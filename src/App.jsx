@@ -51,6 +51,24 @@ const PIPELINE_TEMPLATE = [
 ];
 
 const SEARCH_STEP_IDS = new Set(['search_1', 'analyze_results', 'search_2']);
+const SIDEBAR_NAV_ITEMS = [
+  { key: 'new', label: '새 작업', icon: '✎', active: false },
+  { key: 'agents', label: 'Agents', icon: '◉', active: true },
+  { key: 'search', label: '검색', icon: '⌕', active: false },
+  { key: 'library', label: '라이브러리', icon: '▤', active: false },
+];
+
+const DEFAULT_HISTORY = [
+  '윤석열 탄핵 사건 정리',
+  '중소기업 매출정보 확인 방법',
+  '교육 데이터 관리 플랫폼 시장 분석',
+];
+
+function truncateLabel(text, max = 26) {
+  if (!text) return '';
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+}
 
 function createPipeline() {
   return {
@@ -76,7 +94,7 @@ function clonePipeline(pipeline) {
     })),
     activity: (pipeline.activity || []).map((item) =>
       item.type === 'sources'
-        ? { ...item, sources: [...(item.sources || [])] }
+        ? { ...item, sources: [...(item.sources || [])], queries: [...(item.queries || [])] }
         : { ...item },
     ),
   };
@@ -93,6 +111,15 @@ function mergeSources(existing = [], incoming = []) {
   [...existing, ...incoming].forEach((item) => {
     if (item?.url) dedup.set(item.url, item);
   });
+  return [...dedup.values()];
+}
+
+function mergeQueries(existing = [], incoming = []) {
+  const dedup = new Set();
+  [...existing, ...incoming]
+    .map((query) => (query || '').trim())
+    .filter(Boolean)
+    .forEach((query) => dedup.add(query));
   return [...dedup.values()];
 }
 
@@ -205,7 +232,7 @@ function App() {
     });
   };
 
-  const upsertThinkingSources = ({ groupId, label, sources }) => {
+  const upsertThinkingSources = ({ groupId, label, sources, query }) => {
     if (!sources?.length) return;
 
     updatePipeline((pipeline) => {
@@ -218,6 +245,7 @@ function App() {
           ...existing,
           label,
           sources: mergeSources(existing.sources || [], sources),
+          queries: mergeQueries(existing.queries || [], [query]),
         };
       } else {
         activityIdRef.current += 1;
@@ -227,6 +255,7 @@ function App() {
           groupId,
           label,
           sources: [...sources],
+          queries: mergeQueries([], [query]),
         });
       }
 
@@ -275,27 +304,35 @@ function App() {
     switch (status) {
       case 'analyze_intent':
         setStepNoteIfEmpty('analyze_intent', '사용자 요청을 접수하고 핵심 의도를 분석하는 중');
+        appendThinkingText('요청을 분석하고 있습니다.');
         break;
       case 'decide_search':
         setStepNoteIfEmpty('decide_search', '최신성/사실성 기준으로 웹검색 필요 여부를 판단하는 중');
+        appendThinkingText('검색 필요 여부를 판단하고 있습니다.');
         break;
       case 'plan_queries':
         setStepNoteIfEmpty('plan_queries', '실행 순서를 포함한 Todo 리스트를 구성하는 중');
+        appendThinkingText('검색 계획을 구성하고 있습니다.');
         break;
       case 'searching':
         setStepNoteIfEmpty('search_1', 'Todo 1단계: 1차 웹검색을 실행하는 중');
+        appendThinkingText('1차 웹검색을 실행하고 있습니다.');
         break;
       case 'analyzing':
         setStepNoteIfEmpty('analyze_results', 'Todo 2단계: 검색 결과의 신뢰성과 누락 정보를 검토하는 중');
+        appendThinkingText('검색 결과를 검토하고 있습니다.');
         break;
       case 'searching_2':
         setStepNoteIfEmpty('search_2', 'Todo 3단계: 2차 웹검색을 실행하는 중');
+        appendThinkingText('2차 웹검색을 실행하고 있습니다.');
         break;
       case 'synthesize':
         setStepNoteIfEmpty('synthesize', '수집 근거를 바탕으로 답변 구조를 설계하는 중');
+        appendThinkingText('답변 구조를 정리하고 있습니다.');
         break;
       case 'thinking':
         setStepNoteIfEmpty('generate', '최종 답변을 작성하는 중');
+        appendThinkingText('답변 초안을 마무리하고 곧 전달하겠습니다.');
         break;
       case 'streaming':
         break;
@@ -408,11 +445,16 @@ function App() {
       return assistant;
     });
 
+    if (payload.query?.trim()) {
+      appendThinkingText(`웹검색 키워드: "${payload.query.trim()}"`);
+    }
+
     if (sources.length > 0) {
       upsertThinkingSources({
         groupId: stepId,
         label: round === 2 ? '추가 웹검색 실행' : '웹검색 실행',
         sources,
+        query: payload.query,
       });
     }
   };
@@ -520,8 +562,8 @@ function App() {
                 setStepNote(
                   'plan_queries',
                   parsed.data?.mode === 'multi'
-                    ? `Todo 확정: ${(parsed.data?.primaryQueries || []).length}개 쿼리로 단계별 검색을 진행합니다.`
-                    : 'Todo 확정: 핵심 쿼리 1개로 검색을 진행합니다.',
+                    ? `Todo 확정: ${(parsed.data?.primaryQueries || []).length}개 쿼리, 쿼리당 최대 ${parsed.data?.primaryResultCount || 5}건 검색합니다.`
+                    : `Todo 확정: 핵심 쿼리 1개, 최대 ${parsed.data?.primaryResultCount || 5}건 검색합니다.`,
                 );
               } else {
                 setStepNote('decide_search', '현재 질문은 내부 지식만으로 답변 가능한 요청입니다.');
@@ -553,7 +595,7 @@ function App() {
                 );
                 setStepNote(
                   'search_2',
-                  `Todo 3단계 확정: ${(parsed.data?.refinedQueries || []).length}개 쿼리를 추가로 실행합니다.`,
+                  `Todo 3단계 확정: ${(parsed.data?.refinedQueries || []).length}개 쿼리, 쿼리당 최대 ${parsed.data?.additionalResultCount || 10}건 추가 검색합니다.`,
                 );
               }
               continue;
@@ -625,26 +667,89 @@ function App() {
     setDetailPanelData(null);
   };
 
+  const recentPrompts = messages
+    .filter((message) => message.role === 'user' && message.content)
+    .map((message) => message.content)
+    .reverse()
+    .slice(0, 3);
+  const historyItems = recentPrompts.length > 0 ? recentPrompts : DEFAULT_HISTORY;
+
   return (
     <div className={`app-layout ${detailPanelData ? 'panel-open' : ''}`}>
+      <aside className="sidebar">
+        <div className="sidebar-top">
+          <div className="brand-row">
+            <div className="brand-mark">
+              <span className="brand-glyph" aria-hidden="true">✺</span>
+              <span className="brand-name">manus</span>
+            </div>
+            <button type="button" className="sidebar-collapse-btn" aria-label="사이드바 토글">
+              <span aria-hidden="true">▮▮</span>
+            </button>
+          </div>
+
+          <nav className="sidebar-nav" aria-label="주요 메뉴">
+            {SIDEBAR_NAV_ITEMS.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className={`sidebar-nav-item ${item.active ? 'active' : ''}`}
+                aria-current={item.active ? 'page' : undefined}
+              >
+                <span className="sidebar-nav-icon" aria-hidden="true">{item.icon}</span>
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        <section className="sidebar-section" aria-label="최근 작업">
+          <div className="sidebar-section-head">
+            <span className="sidebar-section-title">모든 작업</span>
+            <button type="button" className="sidebar-add-btn" aria-label="새 작업 추가">＋</button>
+          </div>
+
+          <div className="sidebar-history">
+            {historyItems.map((item, index) => (
+              <button
+                key={`${item}-${index}`}
+                type="button"
+                className={`sidebar-history-item ${index === 0 ? 'active' : ''}`}
+              >
+                <span className="sidebar-history-icon" aria-hidden="true">◧</span>
+                <span className="sidebar-history-label">{truncateLabel(item)}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <div className="sidebar-footer">
+          <button type="button" className="sidebar-share-btn">Manus 공유하기</button>
+        </div>
+      </aside>
+
       <div className="app">
         <header className="header">
-          <h1>AI 채팅</h1>
+          <div className="workspace-title-wrap">
+            <h1>Manus 1.6 Lite</h1>
+            <span className="workspace-title-caret" aria-hidden="true">▾</span>
+          </div>
           <div className="header-controls">
-            <span className="auto-search-badge">자동 검색 오케스트레이터</span>
-            {messages.length > 0 && (
-              <button className="clear-btn" onClick={handleClear}>
-                초기화
-              </button>
-            )}
+            <button type="button" className="trial-btn">무료 체험 시작</button>
+            <button type="button" className="top-icon-btn" aria-label="공유">
+              <span aria-hidden="true">⤴</span>
+            </button>
+            <button type="button" className="top-icon-btn" aria-label="설정">
+              <span aria-hidden="true">⋯</span>
+            </button>
           </div>
         </header>
 
         <main className="chat-container">
           {messages.length === 0 ? (
             <div className="empty-state">
-              <p className="empty-title">무엇이든 물어보세요.</p>
-              <p className="empty-sub">질문을 분석해 검색 필요 여부를 자동 판단하고, 필요할 때만 검색 후 답변합니다.</p>
+              <p className="empty-title">Manus에게 물어보세요.</p>
+              <p className="empty-sub">질문을 분석하고 필요한 경우에만 검색을 실행해 근거 기반 답변을 제공합니다.</p>
             </div>
           ) : (
             <div className="messages">
@@ -674,17 +779,27 @@ function App() {
 
         <footer className="input-area">
           <form onSubmit={handleSubmit} className="input-form">
+            <button type="button" className="input-icon-btn" aria-label="도구 추가">
+              <span aria-hidden="true">＋</span>
+            </button>
+            <label htmlFor="chat-input" className="sr-only">메시지 입력</label>
             <input
+              id="chat-input"
               ref={inputRef}
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="메시지를 입력하세요..."
+              placeholder="Manus에게 메시지 보내기"
               disabled={isLoading}
               autoFocus
             />
-            <button type="submit" disabled={isLoading || !input.trim()}>
-              {isLoading ? '...' : '전송'}
+            {messages.length > 0 && (
+              <button type="button" className="clear-btn" onClick={handleClear}>
+                초기화
+              </button>
+            )}
+            <button type="submit" className="send-btn" disabled={isLoading || !input.trim()}>
+              {isLoading ? '...' : '↑'}
             </button>
           </form>
         </footer>

@@ -24,13 +24,20 @@ const SEARCH_PLAN_FALLBACK = {
   shouldSearch: false,
   mode: 'none',
   primaryQueries: [],
+  primaryResultCount: 0,
   reason: 'Planner fallback: use internal reasoning only.',
 };
 
 const SECOND_SEARCH_FALLBACK = {
   needsMore: false,
   refinedQueries: [],
+  additionalResultCount: 0,
   reason: 'Follow-up search not required.',
+};
+
+const SEARCH_RESULT_LIMITS = {
+  primary: { min: 3, max: 12, defaultSingle: 5, defaultMulti: 4 },
+  followup: { min: 5, max: 15, default: 10 },
 };
 
 const NO_SEARCH_HINTS = [
@@ -53,6 +60,61 @@ function sendSSE(res, type, data) {
 
 function toStringSafe(value) {
   return typeof value === 'string' ? value : '';
+}
+
+function normalizeTextForCompare(text) {
+  return toStringSafe(text)
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[^0-9a-z가-힣\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function toBigrams(text) {
+  const src = normalizeTextForCompare(text).replace(/\s+/g, '');
+  if (!src) return [];
+  if (src.length === 1) return [src];
+  const arr = [];
+  for (let i = 0; i < src.length - 1; i += 1) {
+    arr.push(src.slice(i, i + 2));
+  }
+  return arr;
+}
+
+function diceSimilarity(a, b) {
+  const aa = toBigrams(a);
+  const bb = toBigrams(b);
+  if (!aa.length || !bb.length) return 0;
+
+  const map = new Map();
+  aa.forEach((item) => map.set(item, (map.get(item) || 0) + 1));
+
+  let overlap = 0;
+  bb.forEach((item) => {
+    const cnt = map.get(item) || 0;
+    if (cnt > 0) {
+      overlap += 1;
+      map.set(item, cnt - 1);
+    }
+  });
+
+  return (2 * overlap) / (aa.length + bb.length);
+}
+
+function isNearDuplicateText(text, history = []) {
+  const recent = (history || []).slice(-6);
+  return recent.some((prev) => diceSimilarity(prev, text) >= 0.6);
+}
+
+function toIntSafe(value, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.trunc(n);
+}
+
+function clampInt(value, min, max) {
+  return Math.max(min, Math.min(max, toIntSafe(value, min)));
 }
 
 function extractFirstJsonObject(text) {
@@ -96,6 +158,7 @@ function normalizeSearchPlan(plan, originalQuery) {
       primaryQueries: safeQuery ? [safeQuery] : [],
       shouldSearch: Boolean(safeQuery),
       mode: safeQuery ? 'single' : 'none',
+      primaryResultCount: safeQuery ? SEARCH_RESULT_LIMITS.primary.defaultSingle : 0,
     };
   }
 
@@ -128,10 +191,24 @@ function normalizeSearchPlan(plan, originalQuery) {
     if (primaryQueries.length <= 1) mode = 'single';
   }
 
+  const defaultPrimaryCount =
+    mode === 'multi'
+      ? SEARCH_RESULT_LIMITS.primary.defaultMulti
+      : SEARCH_RESULT_LIMITS.primary.defaultSingle;
+
+  const primaryResultCount = shouldSearch
+    ? clampInt(
+        plan.primaryResultCount ?? plan.primaryMaxResults ?? plan.resultCount ?? defaultPrimaryCount,
+        SEARCH_RESULT_LIMITS.primary.min,
+        SEARCH_RESULT_LIMITS.primary.max,
+      )
+    : 0;
+
   return {
     shouldSearch,
     mode,
     primaryQueries,
+    primaryResultCount,
     reason: toStringSafe(plan.reason) || SEARCH_PLAN_FALLBACK.reason,
   };
 }
@@ -149,10 +226,22 @@ function normalizeSecondSearchDecision(decision) {
 
   const uniqueQueries = [...new Set(refinedQueries)].slice(0, 2);
   const needsMore = Boolean(decision.needsMore) && uniqueQueries.length > 0;
+  const additionalResultCount = needsMore
+    ? clampInt(
+        decision.additionalResultCount ??
+          decision.additionalMaxResults ??
+          decision.maxResults ??
+          decision.resultCount ??
+          SEARCH_RESULT_LIMITS.followup.default,
+        SEARCH_RESULT_LIMITS.followup.min,
+        SEARCH_RESULT_LIMITS.followup.max,
+      )
+    : 0;
 
   return {
     needsMore,
     refinedQueries: needsMore ? uniqueQueries : [],
+    additionalResultCount,
     reason: toStringSafe(decision.reason) || SECOND_SEARCH_FALLBACK.reason,
   };
 }
@@ -190,6 +279,9 @@ function buildHeuristicSearchPlan(userQuery) {
     shouldSearch: true,
     mode: multiHint ? 'multi' : 'single',
     primaryQueries: [query],
+    primaryResultCount: multiHint
+      ? SEARCH_RESULT_LIMITS.primary.defaultMulti
+      : SEARCH_RESULT_LIMITS.primary.defaultSingle,
     reason: multiHint
       ? 'Heuristic: likely multi-topic factual request.'
       : 'Heuristic: factual/procedural request; search recommended.',
@@ -198,7 +290,13 @@ function buildHeuristicSearchPlan(userQuery) {
 
 async function callGlmJson(
   messages,
-  { model = ORCHESTRATOR_MODEL, timeoutMs = 9000, maxTokens = 220, temperature = 0.2 } = {},
+  {
+    model = ORCHESTRATOR_MODEL,
+    timeoutMs = 9000,
+    maxTokens = 220,
+    temperature = 0.2,
+    disableThinking = false,
+  } = {},
 ) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -216,6 +314,7 @@ async function callGlmJson(
         stream: false,
         max_tokens: maxTokens,
         temperature,
+        ...(disableThinking ? { thinking: { type: 'disabled' } } : {}),
       }),
       signal: controller.signal,
     });
@@ -235,7 +334,13 @@ async function callGlmJson(
 
 async function callGlmText(
   messages,
-  { model = ORCHESTRATOR_MODEL, timeoutMs = 7000, maxTokens = 120, temperature = 0.3 } = {},
+  {
+    model = ORCHESTRATOR_MODEL,
+    timeoutMs = 7000,
+    maxTokens = 120,
+    temperature = 0.3,
+    disableThinking = false,
+  } = {},
 ) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -253,6 +358,7 @@ async function callGlmText(
         stream: false,
         max_tokens: maxTokens,
         temperature,
+        ...(disableThinking ? { thinking: { type: 'disabled' } } : {}),
       }),
       signal: controller.signal,
     });
@@ -263,7 +369,10 @@ async function callGlmText(
     }
 
     const payload = await res.json();
-    return toStringSafe(payload.choices?.[0]?.message?.content).trim();
+    const message = payload.choices?.[0]?.message || {};
+    const content = toStringSafe(message.content).trim();
+    if (content) return content;
+    return toStringSafe(message.reasoning_content).trim();
   } finally {
     clearTimeout(timeout);
   }
@@ -308,7 +417,7 @@ function buildThinkingFallback(stage, context = {}) {
     case 'searching':
       return '신뢰 가능한 근거를 확보하기 위해 웹검색을 실행하고 있습니다.';
     case 'search_results':
-      return `웹검색 결과에서 출처 ${context.sourceCount || 0}개를 확보했습니다.`;
+      return `웹검색 결과에서 출처 ${context.sourceCount || 0}개를 확보했고 ${toStringSafe(context.domainsText) || '핵심 도메인'}를 우선 검토하겠습니다.`;
     case 'analyzing':
       return '검색 결과를 검토해 누락 정보와 신뢰도를 확인하고 있습니다.';
     case 'searching_2':
@@ -336,17 +445,28 @@ async function generateThinkingNarration({ stage, userQuery, context = {} }) {
   if (context.searchPlan) {
     lines.push(`search_should: ${Boolean(context.searchPlan.shouldSearch)}`);
     lines.push(`search_mode: ${toStringSafe(context.searchPlan.mode)}`);
+    lines.push(`primary_result_count: ${toIntSafe(context.searchPlan.primaryResultCount, 0)}`);
     lines.push(`search_reason: ${toStringSafe(context.searchPlan.reason).slice(0, 200)}`);
     lines.push(`primary_queries: ${(context.searchPlan.primaryQueries || []).join(' | ').slice(0, 240)}`);
   }
 
   if (context.secondDecision) {
     lines.push(`needs_more: ${Boolean(context.secondDecision.needsMore)}`);
+    lines.push(`additional_result_count: ${toIntSafe(context.secondDecision.additionalResultCount, 0)}`);
     lines.push(`decision_reason: ${toStringSafe(context.secondDecision.reason).slice(0, 200)}`);
   }
 
   if (typeof context.sourceCount === 'number') {
     lines.push(`source_count: ${context.sourceCount}`);
+  }
+  if (typeof context.maxResults === 'number') {
+    lines.push(`max_results_per_query: ${context.maxResults}`);
+  }
+  if (context.domainsText) {
+    lines.push(`top_domains: ${context.domainsText}`);
+  }
+  if (Array.isArray(context.previousLines) && context.previousLines.length > 0) {
+    lines.push(`previous_lines: ${context.previousLines.slice(-4).join(' || ')}`);
   }
 
   if (context.round) {
@@ -364,7 +484,13 @@ async function generateThinkingNarration({ stage, userQuery, context = {} }) {
         'You are an orchestration narrator for a "Thinking" panel.',
         'Return exactly one Korean sentence.',
         'Keep it concise and natural, no bullet, no quotes, no markdown.',
+        'Length target: about 28~55 Korean characters.',
         'Describe current 판단 and next action.',
+        'Include at least one concrete detail from the context (query term, source count, max_results, or domain).',
+        'Avoid repeating the same generic sentence across stages.',
+        'Do not restate the same meaning as previous_lines.',
+        'Do not invent numbers, domains, or facts that are not present in context.',
+        'If a value is missing, avoid specific numeric claims.',
       ].join('\n'),
     },
     {
@@ -379,6 +505,7 @@ async function generateThinkingNarration({ stage, userQuery, context = {} }) {
       maxTokens: 90,
       timeoutMs: 7000,
       temperature: 0.25,
+      disableThinking: true,
     });
     const normalized = toStringSafe(raw)
       .replace(/```[\s\S]*?```/g, '')
@@ -393,19 +520,47 @@ async function generateThinkingNarration({ stage, userQuery, context = {} }) {
   }
 }
 
-async function emitThinking(res, { stage, userQuery, context }) {
-  const text = await generateThinkingNarration({ stage, userQuery, context });
-  if (text) sendSSE(res, 'thinking_text', text);
+async function emitThinking(res, { stage, stageKey, userQuery, context, history, emittedKeys }) {
+  const key = toStringSafe(stageKey) || toStringSafe(stage);
+  if (key && emittedKeys instanceof Set && emittedKeys.has(key)) return;
+
+  const text = await generateThinkingNarration({
+    stage,
+    userQuery,
+    context: {
+      ...context,
+      previousLines: history || [],
+    },
+  });
+  if (!text) return;
+  if (isNearDuplicateText(text, history)) return;
+
+  if (Array.isArray(history)) {
+    history.push(text);
+    if (history.length > 12) history.shift();
+  }
+
+  if (key && emittedKeys instanceof Set) {
+    emittedKeys.add(key);
+  }
+
+  sendSSE(res, 'thinking_text', text);
 }
 
-async function searchWeb(query) {
+async function searchWeb(query, maxResults = SEARCH_RESULT_LIMITS.followup.default) {
+  const resolvedMaxResults = clampInt(
+    maxResults,
+    SEARCH_RESULT_LIMITS.primary.min,
+    SEARCH_RESULT_LIMITS.followup.max,
+  );
+
   const res = await fetch('https://api.tavily.com/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       api_key: TAVILY_API_KEY,
       query,
-      max_results: 10,
+      max_results: resolvedMaxResults,
       include_answer: true,
       include_raw_content: true,
     }),
@@ -460,9 +615,11 @@ async function buildInitialSearchPlan(userQuery, conversationMessages) {
         '- mode=single for one coherent lookup question.',
         '- mode=multi for clearly distinct subtopics requiring separate lookups.',
         '- primaryQueries should be 0 items if mode=none, 1 item for single, up to 3 items for multi.',
+        '- primaryResultCount is per-query max_results for first-round retrieval.',
+        '- preferred range for primaryResultCount: 3~8 for single, 3~6 for multi.',
         '',
         'Return JSON schema exactly:',
-        '{"shouldSearch": boolean, "mode": "none"|"single"|"multi", "primaryQueries": string[], "reason": string}',
+        '{"shouldSearch": boolean, "mode": "none"|"single"|"multi", "primaryQueries": string[], "primaryResultCount": number, "reason": string}',
       ].join('\n'),
     },
   ];
@@ -472,6 +629,7 @@ async function buildInitialSearchPlan(userQuery, conversationMessages) {
       model: ORCHESTRATOR_MODEL,
       maxTokens: 260,
       timeoutMs: 9000,
+      disableThinking: true,
     });
     const normalized = normalizeSearchPlan(plan, userQuery);
 
@@ -524,9 +682,10 @@ async function shouldDoSecondSearch(userQuery, searchPlan, firstRoundEntries) {
         digest,
         '',
         'Return JSON schema exactly:',
-        '{"needsMore": boolean, "refinedQueries": string[], "reason": string}',
+        '{"needsMore": boolean, "refinedQueries": string[], "additionalResultCount": number, "reason": string}',
         'If needsMore=false, refinedQueries must be empty.',
         'If needsMore=true, provide 1-2 concise refined queries.',
+        'If needsMore=true, additionalResultCount should usually be 8~12.',
       ].join('\n'),
     },
   ];
@@ -536,6 +695,7 @@ async function shouldDoSecondSearch(userQuery, searchPlan, firstRoundEntries) {
       model: ORCHESTRATOR_MODEL,
       maxTokens: 220,
       timeoutMs: 9000,
+      disableThinking: true,
     });
     return normalizeSecondSearchDecision(decision);
   } catch (err) {
@@ -544,16 +704,17 @@ async function shouldDoSecondSearch(userQuery, searchPlan, firstRoundEntries) {
   }
 }
 
-async function runSearchBatch({ queries, round, res }) {
+async function runSearchBatch({ queries, round, res, maxResults }) {
   const normalized = [...new Set((queries || []).map((q) => toStringSafe(q).trim()).filter(Boolean))];
   if (!normalized.length) return [];
 
   const settled = await Promise.allSettled(
     normalized.map(async (query) => {
-      const data = await searchWeb(query);
+      const data = await searchWeb(query, maxResults);
       return {
         round,
         query,
+        maxResults,
         answer: data.answer,
         results: data.results,
       };
@@ -576,6 +737,23 @@ async function runSearchBatch({ queries, round, res }) {
   });
 
   return entries;
+}
+
+function summarizeTopDomains(entries, max = 3) {
+  const domains = [];
+  for (const entry of entries || []) {
+    for (const result of entry.results || []) {
+      try {
+        const u = new URL(result.url);
+        if (!domains.includes(u.hostname)) domains.push(u.hostname);
+      } catch {
+        // ignore invalid url
+      }
+      if (domains.length >= max) break;
+    }
+    if (domains.length >= max) break;
+  }
+  return domains.join(', ');
 }
 
 function buildSearchContext(entries) {
@@ -634,6 +812,15 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'last message must be from user' });
     }
 
+    const thinkingHistory = [];
+    const emittedThinkingKeys = new Set();
+    const emit = (payload) =>
+      emitThinking(res, {
+        ...payload,
+        history: thinkingHistory,
+        emittedKeys: emittedThinkingKeys,
+      });
+
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -644,7 +831,7 @@ app.post('/api/chat', async (req, res) => {
     res.write(': connected\n\n');
 
     sendSSE(res, 'status', 'analyze_intent');
-    await emitThinking(res, {
+    await emit({
       stage: 'analyze_intent',
       userQuery: lastMessage.content,
     });
@@ -652,45 +839,47 @@ app.post('/api/chat', async (req, res) => {
     sendSSE(res, 'status', 'decide_search');
     const searchPlan = await buildInitialSearchPlan(lastMessage.content, messages);
     sendSSE(res, 'search_plan', searchPlan);
-    await emitThinking(res, {
+    await emit({
       stage: 'decide_search',
       userQuery: lastMessage.content,
-      context: { searchPlan },
+      context: { searchPlan, maxResults: searchPlan.primaryResultCount },
     });
 
     sendSSE(res, 'status', 'plan_queries');
-    await emitThinking(res, {
-      stage: 'plan_queries',
-      userQuery: lastMessage.content,
-      context: { searchPlan },
-    });
 
     let allSearchEntries = [];
 
     if (searchPlan.shouldSearch && TAVILY_API_KEY) {
       sendSSE(res, 'status', 'searching');
-      await emitThinking(res, {
+      await emit({
         stage: 'searching',
         userQuery: lastMessage.content,
-        context: { searchPlan },
+        context: { searchPlan, maxResults: searchPlan.primaryResultCount },
       });
 
       const firstRoundEntries = await runSearchBatch({
         queries: searchPlan.primaryQueries,
         round: 1,
         res,
+        maxResults: searchPlan.primaryResultCount,
       });
 
       allSearchEntries = [...firstRoundEntries];
-      await emitThinking(res, {
+      await emit({
         stage: 'search_results',
+        stageKey: 'search_results_round_1',
         userQuery: lastMessage.content,
-        context: { round: 1, sourceCount: firstRoundEntries.reduce((acc, item) => acc + item.results.length, 0) },
+        context: {
+          round: 1,
+          sourceCount: firstRoundEntries.reduce((acc, item) => acc + item.results.length, 0),
+          maxResults: searchPlan.primaryResultCount,
+          domainsText: summarizeTopDomains(firstRoundEntries, 4),
+        },
       });
 
       if (firstRoundEntries.length > 0) {
         sendSSE(res, 'status', 'analyzing');
-        await emitThinking(res, {
+        await emit({
           stage: 'analyzing',
           userQuery: lastMessage.content,
           context: { searchPlan },
@@ -701,34 +890,45 @@ app.post('/api/chat', async (req, res) => {
           firstRoundEntries,
         );
         sendSSE(res, 'search_decision', secondDecision);
-        await emitThinking(res, {
+        await emit({
           stage: 'analyzing',
           userQuery: lastMessage.content,
-          context: { searchPlan, secondDecision },
+          context: {
+            searchPlan,
+            secondDecision,
+            maxResults: secondDecision.additionalResultCount,
+          },
         });
 
         if (secondDecision.needsMore) {
           sendSSE(res, 'status', 'searching_2');
-          await emitThinking(res, {
+          await emit({
             stage: 'searching_2',
             userQuery: lastMessage.content,
-            context: { secondDecision },
+            context: { secondDecision, maxResults: secondDecision.additionalResultCount },
           });
           const secondRoundEntries = await runSearchBatch({
             queries: secondDecision.refinedQueries,
             round: 2,
             res,
+            maxResults: secondDecision.additionalResultCount,
           });
           allSearchEntries = [...allSearchEntries, ...secondRoundEntries];
-          await emitThinking(res, {
+          await emit({
             stage: 'search_results',
+            stageKey: 'search_results_round_2',
             userQuery: lastMessage.content,
-            context: { round: 2, sourceCount: secondRoundEntries.reduce((acc, item) => acc + item.results.length, 0) },
+            context: {
+              round: 2,
+              sourceCount: secondRoundEntries.reduce((acc, item) => acc + item.results.length, 0),
+              maxResults: secondDecision.additionalResultCount,
+              domainsText: summarizeTopDomains(secondRoundEntries, 4),
+            },
           });
         }
       } else {
         sendSSE(res, 'status', 'search_failed');
-        await emitThinking(res, {
+        await emit({
           stage: 'error',
           userQuery: lastMessage.content,
           context: { error: '1차 검색 결과를 확보하지 못했습니다.' },
@@ -736,7 +936,7 @@ app.post('/api/chat', async (req, res) => {
       }
     } else {
       sendSSE(res, 'status', 'search_skipped');
-      await emitThinking(res, {
+      await emit({
         stage: 'plan_queries',
         userQuery: lastMessage.content,
         context: { searchPlan },
@@ -747,7 +947,7 @@ app.post('/api/chat', async (req, res) => {
           query: searchPlan.primaryQueries[0] || '',
           error: 'TAVILY_API_KEY is missing. Search is skipped.',
         });
-        await emitThinking(res, {
+        await emit({
           stage: 'error',
           userQuery: lastMessage.content,
           context: { error: 'TAVILY_API_KEY is missing. Search is skipped.' },
@@ -756,7 +956,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     sendSSE(res, 'status', 'synthesize');
-    await emitThinking(res, {
+    await emit({
       stage: 'synthesize',
       userQuery: lastMessage.content,
       context: { searchPlan },
@@ -765,7 +965,7 @@ app.post('/api/chat', async (req, res) => {
     const finalMessages = buildFinalMessages(messages, allSearchEntries);
 
     sendSSE(res, 'status', 'thinking');
-    await emitThinking(res, {
+    await emit({
       stage: 'thinking',
       userQuery: lastMessage.content,
       context: { searchPlan },
@@ -818,7 +1018,7 @@ app.post('/api/chat', async (req, res) => {
 
 app.post('/api/search', async (req, res) => {
   try {
-    const { query } = req.body || {};
+    const { query, maxResults } = req.body || {};
     if (!toStringSafe(query).trim()) {
       return res.status(400).json({ error: 'query is required' });
     }
@@ -827,7 +1027,7 @@ app.post('/api/search', async (req, res) => {
       return res.status(500).json({ error: 'TAVILY_API_KEY is missing' });
     }
 
-    const data = await searchWeb(query);
+    const data = await searchWeb(query, maxResults);
     res.json(data);
   } catch (err) {
     console.error('Search error:', err.message);

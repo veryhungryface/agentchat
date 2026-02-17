@@ -9,6 +9,15 @@ function formatElapsed(ms) {
   return `${min}m ${remain}s`;
 }
 
+function createSourcePayload(item) {
+  return {
+    id: item.groupId,
+    label: item.label,
+    note: `출처 ${item.sources.length}개`,
+    sources: item.sources,
+  };
+}
+
 function TaskPanel({ pipeline, isActive, onSourceClick, onSourcesOpen }) {
   const [collapsedAfterComplete, setCollapsedAfterComplete] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -32,6 +41,7 @@ function TaskPanel({ pipeline, isActive, onSourceClick, onSourcesOpen }) {
   const summaryText = formatElapsed(elapsedMs);
   const thinkingDots = '.'.repeat(((Math.floor(elapsedMs / 450) % 3) + 1)).padEnd(3, ' ');
   const showCollapsedSummary = pipeline.isComplete && !isActive && collapsedAfterComplete;
+  const showProgressSpin = isActive && !pipeline.isComplete;
 
   return (
     <div className={`task-panel task-panel-thinking ${pipeline.isComplete ? 'task-panel-complete' : ''}`}>
@@ -56,7 +66,7 @@ function TaskPanel({ pipeline, isActive, onSourceClick, onSourcesOpen }) {
             </div>
 
             <div className="task-panel-header-right">
-              <span className="task-panel-time">{formatElapsed(elapsedMs)}</span>
+              <span className="task-panel-time">{summaryText}</span>
               {pipeline.isComplete && !isActive && (
                 <button
                   type="button"
@@ -71,7 +81,10 @@ function TaskPanel({ pipeline, isActive, onSourceClick, onSourcesOpen }) {
 
           <div className="thinking-activity-list">
             {activities.length === 0 ? (
-              <p className="thinking-activity-line">질문을 분석하고 있습니다.</p>
+              <p className="thinking-activity-line">
+                {showProgressSpin && <span className="activity-spin" aria-hidden="true" />}
+                <span>질문을 분석하고 있습니다.</span>
+              </p>
             ) : (
               activities.map((item) => {
                 if (item.type === 'sources') {
@@ -79,23 +92,27 @@ function TaskPanel({ pipeline, isActive, onSourceClick, onSourcesOpen }) {
                     <div key={item.id} className="thinking-source-block">
                       <div className="task-note-row">
                         <span className="thinking-source-title">
-                          {item.label} · 출처 {item.sources.length}개
+                          {showProgressSpin && <span className="activity-spin" aria-hidden="true" />}
+                          <span>{item.label} · 출처 {item.sources.length}개</span>
                         </span>
                         <button
                           type="button"
                           className="task-source-open-btn"
-                          onClick={() =>
-                            onSourcesOpen?.({
-                              id: item.groupId,
-                              label: item.label,
-                              note: `출처 ${item.sources.length}개`,
-                              sources: item.sources,
-                            })
-                          }
+                          onClick={() => onSourcesOpen?.(createSourcePayload(item))}
                         >
-                          클릭해서 출처 보기
+                          출처 보기
                         </button>
                       </div>
+
+                      {item.queries?.length > 0 && (
+                        <div className="thinking-query-list">
+                          {item.queries.map((query) => (
+                            <span key={`${item.id}-${query}`} className="thinking-query-chip">
+                              "{query}"
+                            </span>
+                          ))}
+                        </div>
+                      )}
 
                       <div className="favicon-strip">
                         {item.sources.map((source, sourceIndex) => (
@@ -105,24 +122,14 @@ function TaskPanel({ pipeline, isActive, onSourceClick, onSourcesOpen }) {
                             className="favicon-item favicon-animate"
                             style={{ animationDelay: `${sourceIndex * 60}ms` }}
                             title={getDomain(source.url)}
-                            onClick={() =>
-                              onSourceClick?.(
-                                {
-                                  id: item.groupId,
-                                  label: item.label,
-                                  note: `출처 ${item.sources.length}개`,
-                                  sources: item.sources,
-                                },
-                                source,
-                              )
-                            }
+                            onClick={() => onSourceClick?.(createSourcePayload(item), source)}
                           >
                             <img
                               src={source.favicon || getFaviconUrl(source.url)}
                               alt=""
                               className="favicon-img"
-                              onError={(e) => {
-                                e.target.style.display = 'none';
+                              onError={(event) => {
+                                event.target.style.display = 'none';
                               }}
                             />
                             <span className="favicon-domain">{getDomain(source.url)}</span>
@@ -135,7 +142,8 @@ function TaskPanel({ pipeline, isActive, onSourceClick, onSourcesOpen }) {
 
                 return (
                   <p key={item.id} className="thinking-activity-line">
-                    {item.text}
+                    {showProgressSpin && <span className="activity-spin" aria-hidden="true" />}
+                    <span>{item.text}</span>
                   </p>
                 );
               })

@@ -27,7 +27,9 @@ function SearchDetailPanel({ data, onClose }) {
           <div className="search-detail-title-wrap">
             <h3 className="search-detail-title">{data.stepLabel || '출처 정보'}</h3>
             <p className="search-detail-meta">
-              {data.note || `출처 ${sources.length}개`} · 클릭하면 새 탭에서 원문으로 이동합니다.
+              {data.note || `출처 ${sources.length}개`}
+              {' · '}
+              항목을 누르면 새 탭에서 원문이 열립니다.
             </p>
           </div>
           <button type="button" className="search-detail-close" onClick={onClose} aria-label="패널 닫기">
@@ -55,8 +57,8 @@ function SearchDetailPanel({ data, onClose }) {
                       src={favicon}
                       alt=""
                       className="search-source-favicon"
-                      onError={(e) => {
-                        e.target.style.display = 'none';
+                      onError={(event) => {
+                        event.target.style.display = 'none';
                       }}
                     />
                   )}
