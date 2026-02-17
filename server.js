@@ -292,10 +292,11 @@ function buildHeuristicSearchPlan(userQuery) {
   }
 
   const multiHint = /\b(vs|versus|compare|comparison)\b|비교|차이|장단점|및|그리고/i.test(query);
+  const seedQuery = hardenSearchQuery(query, query, 'primary') || keywordizeQueryText(query) || query;
   return {
     shouldSearch: true,
     mode: multiHint ? 'multi' : 'single',
-    primaryQueries: [query],
+    primaryQueries: [seedQuery],
     primaryResultCount: multiHint
       ? SEARCH_RESULT_LIMITS.primary.defaultMulti
       : SEARCH_RESULT_LIMITS.primary.defaultSingle,
@@ -311,6 +312,11 @@ function normalizeQueryArray(rawQueries, maxQueries = 3) {
     maxQueries,
   );
 }
+
+const KOREAN_REQUEST_ENDINGS =
+  /(알려줘|알려주세요|찾아줘|검색해줘|정리해줘|요약해줘|설명해줘|만들어줘|추천해줘|해줘|해주세요|해줄래|부탁해)$/i;
+const EN_REQUEST_PHRASES =
+  /\b(please|tell me|show me|help me|can you|could you|how to|what is|explain)\b/i;
 
 function keywordizeQueryText(text) {
   let q = toStringSafe(text)
@@ -337,29 +343,51 @@ function keywordizeQueryText(text) {
   return q.slice(0, 90).trim();
 }
 
+function isQueryTooSimilarToUser(query, userQuery) {
+  const q = toStringSafe(query).trim();
+  const u = toStringSafe(userQuery).trim();
+  if (!q || !u) return false;
+
+  if (normalizeForCompare(q) === normalizeForCompare(u)) return true;
+  return diceSimilarity(q, u) >= 0.84;
+}
+
+function isSentenceLikeSearchQuery(query) {
+  const q = toStringSafe(query).trim();
+  if (!q) return false;
+
+  if (KOREAN_REQUEST_ENDINGS.test(q)) return true;
+  if (EN_REQUEST_PHRASES.test(q)) return true;
+
+  const tokenCount = q.split(/\s+/).filter(Boolean).length;
+  return tokenCount >= 9;
+}
+
+function hardenSearchQuery(query, userQuery, mode = 'primary') {
+  let next = keywordizeQueryText(query) || keywordizeQueryText(userQuery) || toStringSafe(query).trim();
+  if (!next) return '';
+
+  if (isQueryTooSimilarToUser(next, userQuery) || isSentenceLikeSearchQuery(next)) {
+    const suffix = mode === 'followup' ? ' 심화 정보' : ' 핵심 정리';
+    if (isQueryTooSimilarToUser(next, userQuery)) {
+      next = `${next} ${suffix}`.trim();
+    }
+    next = keywordizeQueryText(next) || next;
+  }
+
+  if (isQueryTooSimilarToUser(next, userQuery)) {
+    const suffix = mode === 'followup' ? ' 추가 근거' : ' 최신 자료';
+    next = `${next} ${suffix}`.trim();
+  }
+
+  return next.slice(0, 90).trim();
+}
+
 function enforceOptimizedQueryQuality(queries, userQuery, mode, maxQueries) {
   const source = normalizeQueryArray(queries, maxQueries);
-  const userNorm = normalizeForCompare(userQuery);
-
-  const adjusted = source.map((query) => {
-    let next = keywordizeQueryText(query) || query;
-    const nextNorm = normalizeForCompare(next);
-
-    if (!nextNorm) next = query;
-
-    if (normalizeForCompare(next) === userNorm) {
-      const base = keywordizeQueryText(userQuery) || next;
-      if (normalizeForCompare(base) !== userNorm) {
-        next = base;
-      } else {
-        const suffix = mode === 'followup' ? ' 심화' : ' 최신 정보';
-        next = `${base}${suffix}`.trim();
-      }
-    }
-
-    return next.slice(0, 90).trim();
-  });
-
+  const adjusted = source
+    .map((query) => hardenSearchQuery(query, userQuery, mode))
+    .filter(Boolean);
   return normalizeQueryArray(adjusted, maxQueries);
 }
 
@@ -786,10 +814,17 @@ async function optimizeSearchQueries({ userQuery, queries, mode = 'primary', max
         '- Add key qualifiers only when they help (official docs, install, setup, latest version, etc.).',
         '- For Korean, rewrite polite request sentences into concise keyword-style search phrases.',
         '- Prefer core terms and constraints over full natural-language sentences.',
+        '- NEVER copy the user sentence verbatim.',
+        '- Remove request endings such as "알려줘/설명해줘/만들어줘/how to/please".',
+        '- Prefer 2~7 keyword tokens when possible.',
         '- Each query must be <= 90 chars.',
         '- Queries must be keyword-style; avoid polite request endings.',
         '- Do not return exactly the same sentence as user query.',
         '- Do not output markdown or explanation.',
+        '',
+        'Examples:',
+        '- "파이썬 코드 구구단게임 만들어줘" -> "파이썬 구구단 게임 코드 예제"',
+        '- "OpenClaw를 커스터마이징하는 방법 알려줘" -> "OpenClaw 커스터마이징 가이드 설정 방법"',
         '',
         'Return JSON schema exactly:',
         '{"queries": string[]}',
@@ -806,7 +841,8 @@ async function optimizeSearchQueries({ userQuery, queries, mode = 'primary', max
     });
 
     const optimized = enforceOptimizedQueryQuality(rewritten?.queries, userQuery, mode, maxQueries);
-    return optimized.length > 0 ? optimized : qualityFallback;
+    const hardened = enforceOptimizedQueryQuality(optimized, userQuery, mode, maxQueries);
+    return hardened.length > 0 ? hardened : qualityFallback;
   } catch (err) {
     console.error('Search query optimizer error:', err.message);
     return qualityFallback;

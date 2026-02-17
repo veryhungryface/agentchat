@@ -432,11 +432,13 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [detailPanelData, setDetailPanelData] = useState(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(true);
   const activityIdRef = useRef(0);
   const currentQuestionRef = useRef('');
 
   const inputRef = useRef(null);
-  const messagesEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
+  const shouldStickToBottomRef = useRef(true);
 
   const typeBufferRef = useRef('');
   const displayedRef = useRef('');
@@ -448,8 +450,37 @@ function App() {
   const maxProgressStepRef = useRef(-1);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    const container = chatContainerRef.current;
+    if (!container) return;
+    if (!shouldStickToBottomRef.current) return;
+    container.scrollTop = container.scrollHeight;
+  }, [messages, isLoading]);
+
+  const handleChatScroll = () => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldStickToBottomRef.current = distanceToBottom < 88;
+  };
+
+  const scrollMessageToTop = (messageIndex) => {
+    const container = chatContainerRef.current;
+    if (!container || messageIndex < 0) return;
+
+    const target = container.querySelector(
+      `.message-group[data-message-index="${messageIndex}"][data-message-role="user"]`,
+    );
+    if (!target) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const nextTop = container.scrollTop + (targetRect.top - containerRect.top) - 8;
+
+    container.scrollTo({
+      top: Math.max(0, nextTop),
+      behavior: 'smooth',
+    });
+  };
 
   const updateLatestAssistant = (mutator) => {
     setMessages((prev) => {
@@ -841,12 +872,17 @@ function App() {
       baseConversation = messages,
       appendUser = true,
       clearComposer = true,
+      alignUserMessageTop,
     } = options;
     const trimmed = (trimmedPrompt || '').trim();
     if (!trimmed || isLoading) return;
 
     const userMessage = { role: 'user', content: trimmed };
     const nextMessages = appendUser ? [...baseConversation, userMessage] : [...baseConversation];
+    const shouldAlignUserMessageTop =
+      typeof alignUserMessageTop === 'boolean'
+        ? alignUserMessageTop
+        : appendUser && baseConversation.length > 0;
     currentQuestionRef.current = trimmed;
 
     const assistantMessage = {
@@ -860,6 +896,7 @@ function App() {
 
     if (clearComposer) setInput('');
     setIsLoading(true);
+    shouldStickToBottomRef.current = !shouldAlignUserMessageTop;
 
     typeBufferRef.current = '';
     displayedRef.current = '';
@@ -876,6 +913,15 @@ function App() {
     flushSync(() => {
       setMessages([...nextMessages, assistantMessage]);
     });
+
+    if (shouldAlignUserMessageTop && appendUser) {
+      const userMessageIndex = nextMessages.length - 1;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          scrollMessageToTop(userMessageIndex);
+        });
+      });
+    }
 
     queueStatusEvent('analyze_intent');
 
@@ -1070,7 +1116,7 @@ function App() {
   };
 
   const handleFollowUpClick = async (prompt) => {
-    await submitPrompt(prompt);
+    await submitPrompt(prompt, { alignUserMessageTop: true });
   };
 
   const handleCopyAnswer = async (message) => {
@@ -1106,12 +1152,8 @@ function App() {
     });
   };
 
-  const recentPrompts = messages
-    .filter((message) => message.role === 'user' && message.content)
-    .map((message) => message.content)
-    .reverse()
-    .slice(0, 3);
-  const historyItems = recentPrompts.length > 0 ? recentPrompts : DEFAULT_HISTORY;
+  const firstPrompt = messages.find((message) => message.role === 'user' && message.content)?.content || '';
+  const historyItems = firstPrompt ? [firstPrompt] : DEFAULT_HISTORY;
 
   return (
     <div className={`app-layout ${detailPanelData ? 'panel-open' : ''} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -1174,24 +1216,49 @@ function App() {
 
           <div className="sidebar-divider" />
 
-          <button type="button" className="sidebar-history-title" aria-label="채팅 기록" title="채팅 기록">
-            채팅 기록
+          <button
+            type="button"
+            className="sidebar-history-title"
+            aria-label="채팅 기록"
+            title="채팅 기록"
+            aria-expanded={isHistoryExpanded}
+            onClick={() => setIsHistoryExpanded((prev) => !prev)}
+          >
+            <div className="sidebar-history-title-inner">
+              <div className="sidebar-history-title-main">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" className="sidebar-history-title-clock" aria-hidden="true">
+                  <path d="M12 18.4C13.6974 18.4 15.3253 17.7257 16.5255 16.5255C17.7257 15.3253 18.4 13.6974 18.4 12C18.4 10.3026 17.7257 8.67475 16.5255 7.47452C15.3253 6.27428 13.6974 5.6 12 5.6C10.3026 5.6 8.67475 6.27428 7.47452 7.47452C6.27428 8.67475 5.6 10.3026 5.6 12C5.6 13.6974 6.27428 15.3253 7.47452 16.5255C8.67475 17.7257 10.3026 18.4 12 18.4ZM12 4C13.0506 4 14.0909 4.20693 15.0615 4.60896C16.0321 5.011 16.914 5.60028 17.6569 6.34315C18.3997 7.08601 18.989 7.96793 19.391 8.93853C19.7931 9.90914 20 10.9494 20 12C20 14.1217 19.1571 16.1566 17.6569 17.6569C16.1566 19.1571 14.1217 20 12 20C7.576 20 4 16.4 4 12C4 9.87827 4.84285 7.84344 6.34315 6.34315C7.84344 4.84285 9.87827 4 12 4ZM12.4 8V12.2L16 14.336L15.4 15.32L11.2 12.8V8H12.4Z" fill="#9F9F9F" />
+                </svg>
+                <span className="sidebar-history-title-text">채팅 기록</span>
+              </div>
+              <span className="sidebar-history-title-chevron" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="6" fill="none" className="sidebar-history-title-chevron-icon">
+                  {isHistoryExpanded ? (
+                    <path fillRule="evenodd" clipRule="evenodd" d="M11.7933 5.80919C11.5176 6.0636 11.0706 6.0636 10.795 5.80919L6 1.38388L1.20502 5.80919C0.929352 6.0636 0.482411 6.0636 0.206747 5.80919C-0.0689172 5.55478 -0.0689172 5.1423 0.206747 4.88788L5.15147 0.324375C5.6201 -0.108125 6.3799 -0.108125 6.84853 0.324375L11.7933 4.88788C12.0689 5.1423 12.0689 5.55478 11.7933 5.80919ZM6.14974 1.24568C6.14967 1.24574 6.14961 1.2458 6.14954 1.24586L6.14974 1.24568ZM5.85046 1.24586C5.85039 1.2458 5.85033 1.24574 5.85026 1.24568L5.85046 1.24586Z" fill="#9F9F9F" />
+                  ) : (
+                    <path fillRule="evenodd" clipRule="evenodd" d="M11.7933 0.190809C11.5176 -0.0636029 11.0706 -0.0636029 10.795 0.190809L6 4.61612L1.20502 0.190809C0.929352 -0.0636031 0.482411 -0.0636031 0.206747 0.190809C-0.0689172 0.445221 -0.0689172 0.857704 0.206747 1.11212L5.15147 5.67562C5.6201 6.10812 6.3799 6.10813 6.84853 5.67562L11.7933 1.11212C12.0689 0.857704 12.0689 0.445221 11.7933 0.190809ZM6.14974 4.75432C6.14967 4.75426 6.14961 4.7542 6.14954 4.75414L6.14974 4.75432ZM5.85046 4.75414C5.85039 4.7542 5.85033 4.75426 5.85026 4.75432L5.85046 4.75414Z" fill="#9F9F9F" />
+                  )}
+                </svg>
+              </span>
+            </div>
           </button>
 
-          <div className="sidebar-history" aria-label="채팅 기록 목록">
-            {historyItems.map((item, index) => (
-              <button
-                key={`${item}-${index}`}
-                type="button"
-                className={`sidebar-history-item ${index === 0 ? 'active' : ''}`}
-                aria-label={item}
-                title={item}
-              >
-                <span className="sidebar-history-dot" aria-hidden="true" />
-                <span className="sidebar-history-label">{truncateLabel(item)}</span>
-              </button>
-            ))}
-          </div>
+          {isHistoryExpanded && (
+            <div className="sidebar-history" aria-label="채팅 기록 목록">
+              {historyItems.map((item, index) => (
+                <button
+                  key={`${item}-${index}`}
+                  type="button"
+                  className={`sidebar-history-item ${index === 0 ? 'active' : ''}`}
+                  aria-label={item}
+                  title={item}
+                >
+                  <span className="sidebar-history-dot" aria-hidden="true" />
+                  <span className="sidebar-history-label">{truncateLabel(item)}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="sidebar-profile">
@@ -1209,7 +1276,7 @@ function App() {
       </aside>
 
       <div className="app">
-        <main className="chat-container">
+        <main ref={chatContainerRef} className="chat-container" onScroll={handleChatScroll}>
           {messages.length === 0 ? (
             <div className="empty-state">
               <p className="empty-title">교사를 위한 AI 비서, issamGPT</p>
@@ -1218,7 +1285,12 @@ function App() {
           ) : (
             <div className="messages">
               {messages.map((message, idx) => (
-                <div key={idx} className="message-group">
+                <div
+                  key={idx}
+                  className="message-group"
+                  data-message-index={idx}
+                  data-message-role={message.role}
+                >
                   {(() => {
                     const isLatest = idx === messages.length - 1;
                     return message.taskPipeline && (
@@ -1246,21 +1318,26 @@ function App() {
                         <button
                           type="button"
                           className="answer-action-btn"
-                          aria-label="답변 복사"
-                          title="답변 복사"
-                          onClick={() => handleCopyAnswer(message)}
-                        >
-                          ⧉
-                        </button>
-                        <button
-                          type="button"
-                          className="answer-action-btn"
                           aria-label="답변 재생성"
                           title="답변 재생성"
                           onClick={() => handleRegenerateAnswer(idx)}
                           disabled={isLoading || idx !== messages.length - 1}
                         >
-                          ↻
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M8.50777 6.90321C9.42803 6.41124 10.4554 6.15386 11.4989 6.15385C13.8986 6.15385 15.5075 7.4929 17.1226 9.23077H15.3453C15.0267 9.23077 14.7685 9.48907 14.7685 9.80769C14.7685 10.1263 15.0267 10.3846 15.3453 10.3846H18.4218C18.7319 10.3846 18.9849 10.1398 18.9981 9.83288C19.0004 9.80615 19.0007 9.77908 18.9986 9.75184V6.73077C18.9986 6.41214 18.7404 6.15385 18.4218 6.15385C18.1032 6.15385 17.8449 6.41214 17.8449 6.73077V8.31132C16.211 6.57015 14.3187 5 11.4989 5C10.2657 5.00001 9.0515 5.3042 7.96392 5.88561C6.87634 6.46703 5.94891 7.30773 5.26378 8.33325C4.57865 9.35877 4.15698 10.5375 4.03611 11.7649C3.91524 12.9923 4.0989 14.2306 4.57083 15.3701C5.04276 16.5096 5.78838 17.5151 6.74166 18.2976C7.69494 19.08 8.82644 19.6153 10.0359 19.8559C11.2455 20.0965 12.4956 20.0351 13.6757 19.6771C14.8558 19.319 15.9294 18.6755 16.8015 17.8033C17.0267 17.578 17.0267 17.2127 16.8015 16.9874C16.5762 16.7621 16.211 16.7621 15.9857 16.9874C15.2478 17.7254 14.3394 18.27 13.3408 18.5729C12.3423 18.8758 11.2845 18.9278 10.261 18.7242C9.2376 18.5206 8.28017 18.0677 7.47355 17.4056C6.66693 16.7436 6.03601 15.8928 5.63669 14.9286C5.23737 13.9644 5.08196 12.9166 5.18424 11.878C5.28651 10.8394 5.64331 9.84204 6.22303 8.97429C6.80276 8.10654 7.5875 7.39518 8.50777 6.90321Z" fill="currentColor" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className="answer-action-btn"
+                          aria-label="답변 복사"
+                          title="답변 복사"
+                          onClick={() => handleCopyAnswer(message)}
+                        >
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <rect x="4" y="8" width="11" height="11" rx="3" stroke="currentColor" strokeWidth="1.2" />
+                            <path d="M15.3462 15H17C18.6569 15 20 13.6569 20 12V7C20 5.34315 18.6569 4 17 4H12C10.3431 4 9 5.34315 9 7V7.53571" stroke="currentColor" strokeWidth="1.2" />
+                          </svg>
                         </button>
                       </div>
                     )}
@@ -1290,7 +1367,6 @@ function App() {
                     )}
                 </div>
               ))}
-              <div ref={messagesEndRef} />
             </div>
           )}
         </main>
