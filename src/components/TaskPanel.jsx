@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { getDomain, getFaviconUrl } from '../utils/favicon';
 
 function formatElapsed(ms) {

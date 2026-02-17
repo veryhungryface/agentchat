@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+﻿import { useEffect, useMemo } from 'react';
 import { getDomain, getFaviconUrl } from '../utils/favicon';
 
 function normalizePreviewText(text, maxLen = 180) {

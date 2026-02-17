@@ -52,10 +52,13 @@ const PIPELINE_TEMPLATE = [
 
 const SEARCH_STEP_IDS = new Set(['search_1', 'analyze_results', 'search_2']);
 const SIDEBAR_NAV_ITEMS = [
-  { key: 'new', label: '새 작업', icon: '✎', active: false },
-  { key: 'agents', label: 'Agents', icon: '◉', active: true },
-  { key: 'search', label: '검색', icon: '⌕', active: false },
-  { key: 'library', label: '라이브러리', icon: '▤', active: false },
+  { key: 'new-chat', label: '새로운 채팅', icon: 'compose', active: true },
+  { key: 'hwp-studio', label: 'HWP Studio', icon: 'hwp', active: false },
+  { key: 'work-reduce', label: '업무 경감', icon: 'brief', active: false },
+  { key: 'ai-box', label: 'AI Box', icon: 'box', active: false },
+  { key: 'ai-mart', label: 'AI Mart', icon: 'mart', active: false },
+  { key: 'archive', label: '내 자료함', icon: 'archive', active: false },
+  { key: 'class', label: '클래스', icon: 'classroom', active: false },
 ];
 
 const DEFAULT_HISTORY = [
@@ -68,6 +71,200 @@ function truncateLabel(text, max = 26) {
   if (!text) return '';
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1)}…`;
+}
+
+function SidebarIcon({ name, className = '' }) {
+  const cls = `sidebar-svg-icon ${className}`.trim();
+
+  if (name === 'logo') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 3c0 2.4-1.4 3.8-3.7 4.7 2.2.6 3.7 2.1 3.7 4.6 0-2.5 1.5-4 3.7-4.6C13.4 6.8 12 5.4 12 3Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M6.1 10.5c0 1.8-1 2.7-2.8 3.4 1.8.5 2.8 1.6 2.8 3.3 0-1.7 1-2.8 2.8-3.3-1.8-.7-2.8-1.6-2.8-3.4Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M17.9 10.5c0 1.8-1 2.7-2.8 3.4 1.8.5 2.8 1.6 2.8 3.3 0-1.7 1-2.8 2.8-3.3-1.8-.7-2.8-1.6-2.8-3.4Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'collapse') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="6" y="5" width="3.2" height="14" rx="1.1" stroke="currentColor" strokeWidth="1.6" />
+        <rect x="14.8" y="5" width="3.2" height="14" rx="1.1" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+
+  if (name === 'compose') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="4.4" y="4.6" width="11.5" height="11.5" rx="2.2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M12.4 14.8 19 8.2l1.7 1.7-6.6 6.6-2.9.9.8-2.6Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'agents') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="6.7" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="12" cy="12" r="2.2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M12 3.4v2.2M12 18.4v2.2M20.6 12h-2.2M5.6 12H3.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'search') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="10.6" cy="10.6" r="5.7" stroke="currentColor" strokeWidth="1.7" />
+        <path d="m15.1 15.1 4.3 4.3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'library') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M7 5.2v13.6M11.5 5.2v13.6M16.8 6.1l2.3 12.7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M5 5h13.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'hwp') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="5" y="5" width="14" height="14" rx="2.4" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M9 10.2h6M9 13h6M9 15.8h4.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'brief') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="4.5" y="7.4" width="15" height="11.2" rx="2.2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M9.2 7.3v-1a1.8 1.8 0 0 1 1.8-1.8h2a1.8 1.8 0 0 1 1.8 1.8v1" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M4.5 11.8h15" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+
+  if (name === 'box') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4.7 8.4 12 4.8l7.3 3.6v7.2L12 19.2l-7.3-3.6V8.4Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M12 4.8v14.4M4.7 8.4 12 12l7.3-3.6" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'mart') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4.6 6.4h2.3l1.8 9h8.2l1.5-6.5H8.1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="10.1" cy="18.3" r="1.2" fill="currentColor" />
+        <circle cx="16.3" cy="18.3" r="1.2" fill="currentColor" />
+      </svg>
+    );
+  }
+
+  if (name === 'archive') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="4.8" y="5.2" width="14.4" height="4.2" rx="1.4" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M6.2 9.4h11.6V18a2 2 0 0 1-2 2H8.2a2 2 0 0 1-2-2V9.4Z" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M10 13h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'classroom') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="4.8" y="5" width="14.4" height="10.6" rx="1.8" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M8.2 19h7.6M12 15.6V19" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M8 9.2h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'project') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M3.8 7.5a2 2 0 0 1 2-2h4l1.5 1.8h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5.8a2 2 0 0 1-2-2V7.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M12 10.2v5.6M9.2 13h5.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'pencil') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="m6.2 16.8 9.5-9.5 2.3 2.3-9.5 9.5-3.2.9.9-3.2Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="m14.8 8.2 2.3 2.3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'clip') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="m9.6 12.8 5.1-5.1a2.6 2.6 0 1 1 3.7 3.7l-6.7 6.7a4.1 4.1 0 0 1-5.8-5.8L12 6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'image') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="4.7" y="5.4" width="14.6" height="13.2" rx="2.2" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="9" cy="10" r="1.5" fill="currentColor" />
+        <path d="m8 16 3-2.9L13.2 15l2.2-2 2.6 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'spark') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 4.2c.3 2.8 1.4 4 4.2 4.3-2.8.3-4 1.4-4.2 4.2-.3-2.8-1.4-4-4.2-4.2 2.8-.3 3.9-1.5 4.2-4.3Z" fill="currentColor" />
+        <path d="M17.8 12.8c.2 1.7.9 2.4 2.6 2.6-1.7.2-2.4.9-2.6 2.6-.2-1.7-.9-2.4-2.6-2.6 1.7-.2 2.4-.9 2.6-2.6Z" fill="currentColor" />
+      </svg>
+    );
+  }
+
+  if (name === 'more') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="8" cy="12" r="1.4" fill="currentColor" />
+        <circle cx="12" cy="12" r="1.4" fill="currentColor" />
+        <circle cx="16" cy="12" r="1.4" fill="currentColor" />
+      </svg>
+    );
+  }
+
+  if (name === 'history') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="5" y="5" width="14" height="14" rx="2.4" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M9 10h6M9 13h6M9 16h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'share') {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="m10.1 8.9 3.8-3.8a3 3 0 1 1 4.2 4.2l-3.8 3.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="m13.9 15.1-3.8 3.8a3 3 0 1 1-4.2-4.2l3.8-3.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="m9.3 14.7 5.4-5.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  return null;
 }
 
 function createPipeline() {
@@ -217,6 +414,7 @@ function App() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [detailPanelData, setDetailPanelData] = useState(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const activityIdRef = useRef(0);
   const currentQuestionRef = useRef('');
 
@@ -891,16 +1089,21 @@ function App() {
   const historyItems = recentPrompts.length > 0 ? recentPrompts : DEFAULT_HISTORY;
 
   return (
-    <div className={`app-layout ${detailPanelData ? 'panel-open' : ''}`}>
-      <aside className="sidebar">
-        <div className="sidebar-top">
+    <div className={`app-layout ${detailPanelData ? 'panel-open' : ''} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+        <div className="sidebar-inner">
           <div className="brand-row">
             <div className="brand-mark">
-              <span className="brand-glyph" aria-hidden="true">✺</span>
+              <span className="brand-glyph" aria-hidden="true"><SidebarIcon name="logo" /></span>
               <span className="brand-name">issamGPT</span>
             </div>
-            <button type="button" className="sidebar-collapse-btn" aria-label="사이드바 토글">
-              <span aria-hidden="true">▮▮</span>
+            <button
+              type="button"
+              className="sidebar-collapse-btn"
+              aria-label={isSidebarCollapsed ? '사이드바 펼치기' : '사이드바 접기'}
+              onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+            >
+              <SidebarIcon name="collapse" />
             </button>
           </div>
 
@@ -911,61 +1114,59 @@ function App() {
                 type="button"
                 className={`sidebar-nav-item ${item.active ? 'active' : ''}`}
                 aria-current={item.active ? 'page' : undefined}
+                aria-label={item.label}
+                title={item.label}
               >
-                <span className="sidebar-nav-icon" aria-hidden="true">{item.icon}</span>
-                <span>{item.label}</span>
+                <span className="sidebar-nav-icon" aria-hidden="true">
+                  <SidebarIcon name={item.icon} />
+                </span>
+                <span className="sidebar-nav-label">{item.label}</span>
               </button>
             ))}
           </nav>
-        </div>
 
-        <section className="sidebar-section" aria-label="최근 작업">
-          <div className="sidebar-section-head">
-            <span className="sidebar-section-title">모든 작업</span>
-            <button type="button" className="sidebar-add-btn" aria-label="새 작업 추가">＋</button>
-          </div>
+          <div className="sidebar-divider" />
 
-          <div className="sidebar-history">
+          <button type="button" className="sidebar-history-title" aria-label="채팅 기록" title="채팅 기록">
+            채팅 기록
+          </button>
+
+          <div className="sidebar-history" aria-label="채팅 기록 목록">
             {historyItems.map((item, index) => (
               <button
                 key={`${item}-${index}`}
                 type="button"
                 className={`sidebar-history-item ${index === 0 ? 'active' : ''}`}
+                aria-label={item}
+                title={item}
               >
-                <span className="sidebar-history-icon" aria-hidden="true">◧</span>
+                <span className="sidebar-history-dot" aria-hidden="true" />
                 <span className="sidebar-history-label">{truncateLabel(item)}</span>
               </button>
             ))}
           </div>
-        </section>
+        </div>
 
-        <div className="sidebar-footer">
-          <button type="button" className="sidebar-share-btn">issamGPT 공유하기</button>
+        <div className="sidebar-profile">
+          <div className="sidebar-profile-main">
+            <div className="sidebar-user-row">
+              <span className="sidebar-user-name">이쌤</span>
+              <span className="sidebar-pro-badge">Pro</span>
+            </div>
+            <p className="sidebar-school">서울교육고등학교</p>
+          </div>
+          <button type="button" className="sidebar-profile-more" aria-label="프로필 메뉴" title="프로필 메뉴">
+            <SidebarIcon name="more" />
+          </button>
         </div>
       </aside>
 
       <div className="app">
-        <header className="header">
-          <div className="workspace-title-wrap">
-            <h1>issamGPT 1.6 Lite</h1>
-            <span className="workspace-title-caret" aria-hidden="true">▾</span>
-          </div>
-          <div className="header-controls">
-            <button type="button" className="trial-btn">무료 체험 시작</button>
-            <button type="button" className="top-icon-btn" aria-label="공유">
-              <span aria-hidden="true">⤴</span>
-            </button>
-            <button type="button" className="top-icon-btn" aria-label="설정">
-              <span aria-hidden="true">⋯</span>
-            </button>
-          </div>
-        </header>
-
         <main className="chat-container">
           {messages.length === 0 ? (
             <div className="empty-state">
-              <p className="empty-title">issamGPT에게 물어보세요.</p>
-              <p className="empty-sub">질문을 분석하고 필요한 경우에만 검색을 실행해 근거 기반 답변을 제공합니다.</p>
+              <p className="empty-title">교사를 위한 AI 비서, issamGPT</p>
+              <p className="empty-sub">수업 준비, 문서 작성, 학급 운영 업무를 빠르게 도와드립니다.</p>
             </div>
           ) : (
             <div className="messages">
@@ -1049,6 +1250,10 @@ function App() {
 
         <footer className="input-area">
           <form onSubmit={handleSubmit} className="input-form">
+            <div className="input-hint-bar">
+              <span className="input-hint-icon" aria-hidden="true"><SidebarIcon name="pencil" /></span>
+              <span>오늘은 어떤 도움을 드릴까요?</span>
+            </div>
             <label htmlFor="chat-input" className="sr-only">메시지 입력</label>
             <textarea
               id="chat-input"
@@ -1059,7 +1264,7 @@ function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleComposerKeyDown}
-              placeholder="issamGPT에게 메시지 보내기…"
+              placeholder="수업 자료 제작부터 행정 업무까지 요청해 보세요."
               autoComplete="off"
               spellCheck
               disabled={isLoading}
@@ -1067,23 +1272,18 @@ function App() {
 
             <div className="input-toolbar">
               <div className="input-tool-group">
-                <button type="button" className="input-icon-btn" aria-label="도구 추가">
-                  <span aria-hidden="true">＋</span>
-                </button>
                 <button type="button" className="input-icon-btn" aria-label="파일 첨부">
-                  <span aria-hidden="true">⌘</span>
+                  <SidebarIcon name="clip" />
                 </button>
-                <button type="button" className="input-icon-btn" aria-label="에이전트 기능">
-                  <span aria-hidden="true">✣</span>
+                <button type="button" className="input-icon-btn" aria-label="이미지 첨부">
+                  <SidebarIcon name="image" />
                 </button>
               </div>
 
               <div className="input-action-group">
-                <button type="button" className="mic-btn" aria-label="음성 입력">
-                  <span aria-hidden="true">⌾</span>
-                </button>
-                <button type="submit" className="send-btn" aria-label="전송" disabled={isLoading || !input.trim()}>
-                  {isLoading ? '…' : '↑'}
+                <button type="submit" className="generate-btn" aria-label="생성하기" disabled={isLoading || !input.trim()}>
+                  <span>생성하기</span>
+                  <span className="generate-btn-icon" aria-hidden="true"><SidebarIcon name="spark" /></span>
                 </button>
               </div>
             </div>

@@ -2,7 +2,7 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash';
 import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript';
 import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript';
@@ -88,7 +88,7 @@ function MarkdownCode({ inline, className, children, ...props }) {
 
       <SyntaxHighlighter
         language={lang || 'text'}
-        style={oneLight}
+        style={oneDark}
         customStyle={{ margin: 0, background: 'transparent', padding: '8px 12px' }}
         codeTagProps={{ style: { fontSize: '0.79rem', lineHeight: 1.45 } }}
         PreTag="div"

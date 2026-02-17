@@ -1,3 +1,5 @@
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable.css');
+
 * {
   margin: 0;
   padding: 0;
@@ -5,10 +7,13 @@
 }
 
 body {
-  font-family: 'Pretendard Variable', Pretendard, 'Noto Sans KR', 'Segoe UI', sans-serif;
-  background: #f1f3f7;
-  color: #1f2532;
+  font-family: 'Pretendard Variable', Pretendard, Arial, sans-serif;
+  background: #f4f4f6;
+  color: #171717;
+  font-size: 16px;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
