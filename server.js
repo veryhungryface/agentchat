@@ -17,9 +17,22 @@ const {
   ORCHESTRATOR_MODEL = process.env.GLM_ORCHESTRATOR_MODEL || 'glm-4.7-flash',
   RESPONSE_MODEL = process.env.GLM_RESPONSE_MODEL || GLM4_MODEL,
   FOLLOWUP_MODEL = process.env.GLM_FOLLOWUP_MODEL || 'glm-4.7-flash',
+  OPENAI_API_KEY = '',
+  OPENAI_BASE_URL = 'https://api.openai.com/v1',
+  OPENAI_MODEL = 'gpt-5-mini',
+  GEMINI_API_KEY = '',
+  GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta',
+  GEMINI_MODEL = 'gemini-2.5-flash',
+  GLM_API_KEY = '',
+  GLM_BASE_URL = '',
+  GLM_MODEL = '',
   TAVILY_API_KEY,
   PORT = 3001,
 } = process.env;
+
+const GLM_RESPONSE_API_KEY = GLM_API_KEY || GLM4_API_KEY || '';
+const GLM_RESPONSE_BASE_URL = GLM_BASE_URL || GLM4_BASE_URL;
+const GLM_RESPONSE_MODEL = GLM_MODEL || GLM4_MODEL;
 
 const SEARCH_PLAN_FALLBACK = {
   shouldSearch: false,
@@ -620,26 +633,186 @@ async function callGlmText(
   }
 }
 
-async function chatWithGlmStream(messages) {
-  const res = await fetch(`${GLM4_BASE_URL}/chat/completions`, {
+function normalizeBaseUrl(url) {
+  return toStringSafe(url).replace(/\/+$/, '');
+}
+
+function detectModelProvider(modelName) {
+  const model = toStringSafe(modelName).trim().toLowerCase();
+  if (!model) return 'glm';
+  if (model.startsWith('gemini')) return 'gemini';
+  if (model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3')) return 'openai';
+  if (model.startsWith('glm-')) return 'glm';
+  return 'glm';
+}
+
+function resolveRequestedResponseModel(requestedModel) {
+  const chosen = toStringSafe(requestedModel).trim();
+  if (chosen) return chosen;
+  return RESPONSE_MODEL || GLM_RESPONSE_MODEL || OPENAI_MODEL || GEMINI_MODEL;
+}
+
+function mapMessagesToGeminiPayload(messages) {
+  const systemText = (messages || [])
+    .filter((m) => m?.role === 'system')
+    .map((m) => toStringSafe(m.content).trim())
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+
+  const contents = (messages || [])
+    .filter((m) => m?.role === 'user' || m?.role === 'assistant')
+    .map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: toStringSafe(m.content) }],
+    }));
+
+  const payload = {
+    contents: contents.length > 0 ? contents : [{ role: 'user', parts: [{ text: '' }] }],
+  };
+
+  if (systemText) {
+    payload.system_instruction = {
+      parts: [{ text: systemText }],
+    };
+  }
+
+  return payload;
+}
+
+async function chatWithOpenAICompatStream({ baseUrl, apiKey, model, messages }) {
+  if (!toStringSafe(apiKey).trim()) {
+    throw new Error(`API key is missing for model: ${model}`);
+  }
+
+  const endpoint = `${normalizeBaseUrl(baseUrl)}/chat/completions`;
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${GLM4_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: RESPONSE_MODEL,
+      model,
       messages,
       stream: true,
     }),
   });
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`GLM4 API error: ${res.status} - ${errText}`);
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Model API error (${model}): ${response.status} - ${errText}`);
   }
 
-  return res;
+  return response;
+}
+
+async function chatWithGeminiText({ baseUrl, apiKey, model, messages }) {
+  if (!toStringSafe(apiKey).trim()) {
+    throw new Error(`Gemini API key is missing for model: ${model}`);
+  }
+
+  const payload = mapMessagesToGeminiPayload(messages);
+  const endpoint = `${normalizeBaseUrl(baseUrl)}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Gemini API error (${model}): ${response.status} - ${errText}`);
+  }
+
+  const data = await response.json();
+  const text = (data.candidates?.[0]?.content?.parts || [])
+    .map((part) => toStringSafe(part?.text))
+    .join('')
+    .trim();
+
+  if (!text) {
+    throw new Error(`Gemini response is empty for model: ${model}`);
+  }
+
+  return text;
+}
+
+async function relayOpenAICompatStreamToClient(response, res) {
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    throw new Error('Model stream is not readable.');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let generatedAnswerText = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data:')) continue;
+
+      const data = trimmed.slice(5).trim();
+      if (data === '[DONE]') continue;
+
+      try {
+        const parsed = JSON.parse(data);
+        const content = parsed.choices?.[0]?.delta?.content;
+        if (content) {
+          generatedAnswerText += content;
+          sendSSE(res, 'content', content);
+        }
+      } catch {
+        // ignore malformed stream line
+      }
+    }
+  }
+
+  return generatedAnswerText;
+}
+
+async function generateResponseWithSelectedModel({ model, messages, res }) {
+  const resolvedModel = resolveRequestedResponseModel(model);
+  const provider = detectModelProvider(resolvedModel);
+
+  if (provider === 'gemini') {
+    const text = await chatWithGeminiText({
+      baseUrl: GEMINI_BASE_URL,
+      apiKey: GEMINI_API_KEY,
+      model: resolvedModel || GEMINI_MODEL,
+      messages,
+    });
+    sendSSE(res, 'content', text);
+    return text;
+  }
+
+  if (provider === 'openai') {
+    const stream = await chatWithOpenAICompatStream({
+      baseUrl: OPENAI_BASE_URL,
+      apiKey: OPENAI_API_KEY,
+      model: resolvedModel || OPENAI_MODEL,
+      messages,
+    });
+    return relayOpenAICompatStreamToClient(stream, res);
+  }
+
+  const stream = await chatWithOpenAICompatStream({
+    baseUrl: GLM_RESPONSE_BASE_URL,
+    apiKey: GLM_RESPONSE_API_KEY,
+    model: resolvedModel || GLM_RESPONSE_MODEL,
+    messages,
+  });
+  return relayOpenAICompatStreamToClient(stream, res);
 }
 
 function buildThinkingFallback(stage, context = {}) {
@@ -1297,7 +1470,7 @@ function buildFinalMessages(messages, searchEntries) {
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { messages } = req.body || {};
+    const { messages, model: requestedModel } = req.body || {};
 
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'messages is required' });
@@ -1517,43 +1690,13 @@ app.post('/api/chat', async (req, res) => {
       userQuery: lastMessage.content,
       context: { searchPlan },
     });
-    const glmRes = await chatWithGlmStream(finalMessages);
 
     sendSSE(res, 'status', 'streaming');
-    const reader = glmRes.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let generatedAnswerText = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data:')) continue;
-
-        const data = trimmed.slice(5).trim();
-        if (data === '[DONE]') {
-          continue;
-        }
-
-        try {
-          const parsed = JSON.parse(data);
-          const content = parsed.choices?.[0]?.delta?.content;
-          if (content) {
-            generatedAnswerText += content;
-            sendSSE(res, 'content', content);
-          }
-        } catch {
-          // ignore malformed stream line
-        }
-      }
-    }
+    const generatedAnswerText = await generateResponseWithSelectedModel({
+      model: requestedModel,
+      messages: finalMessages,
+      res,
+    });
 
     const followUps = await generateFollowUpQuestions({
       userQuery: lastMessage.content,
@@ -1571,6 +1714,12 @@ app.post('/api/chat', async (req, res) => {
     if (!res.headersSent) {
       res.status(500).json({ error: err.message });
     } else {
+      try {
+        sendSSE(res, 'content', `오류가 발생했습니다: ${err.message}`);
+        res.write('data: [DONE]\n\n');
+      } catch {
+        // ignore secondary stream error
+      }
       res.end();
     }
   }

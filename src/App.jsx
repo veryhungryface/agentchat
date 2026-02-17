@@ -70,6 +70,60 @@ const DEFAULT_HISTORY = [
   '교육 데이터 관리 플랫폼 시장 분석',
 ];
 
+const MODEL_GROUPS = [
+  {
+    id: 'gemini',
+    label: 'Gemini',
+    models: [
+      'gemini-3-pro-preview',
+      'gemini-3-flash-preview',
+      'gemini-3-deep-think',
+      'gemini-2.5-pro',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-flash-latest',
+      'gemini-flash-lite-latest',
+    ],
+  },
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    models: [
+      'gpt-5.2-pro',
+      'gpt-5.2',
+      'gpt-5.2-chat',
+      'gpt-5-mini',
+      'gpt-5-nano',
+      'gpt-5-thinking',
+      'gpt-5-thinking-mini',
+      'gpt-5-thinking-nano',
+      'gpt-5-thinking-pro',
+      'gpt-4.1',
+      'gpt-4.1-mini',
+      'gpt-4.1-nano',
+    ],
+  },
+  {
+    id: 'glm',
+    label: 'GLM',
+    models: [
+      'glm-5',
+      'glm-4.7',
+      'glm-4.7-flashx',
+      'glm-4.7-flash',
+      'glm-4.6',
+      'glm-4.5',
+      'glm-4.5-x',
+      'glm-4.5-air',
+      'glm-4.5-airx',
+      'glm-4.5-flash',
+    ],
+  },
+];
+
+const MODEL_IDS = new Set(MODEL_GROUPS.flatMap((group) => group.models));
+const DEFAULT_CHAT_MODEL = 'glm-4.7-flash';
+
 function truncateLabel(text, max = 26) {
   if (!text) return '';
   if (text.length <= max) return text;
@@ -436,6 +490,12 @@ function App() {
   const [detailPanelData, setDetailPanelData] = useState(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(true);
+  const [selectedModel, setSelectedModel] = useState(() => {
+    if (typeof window === 'undefined') return DEFAULT_CHAT_MODEL;
+    const saved = window.localStorage.getItem('issamGPT:selectedModel');
+    return saved && MODEL_IDS.has(saved) ? saved : DEFAULT_CHAT_MODEL;
+  });
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [composerReservePx, setComposerReservePx] = useState(212);
   const [followUpSpacerPx, setFollowUpSpacerPx] = useState(0);
   const activityIdRef = useRef(0);
@@ -443,6 +503,7 @@ function App() {
 
   const inputRef = useRef(null);
   const inputFormRef = useRef(null);
+  const modelPickerRef = useRef(null);
   const chatContainerRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
 
@@ -461,6 +522,37 @@ function App() {
     if (!shouldStickToBottomRef.current) return;
     container.scrollTop = container.scrollHeight;
   }, [messages, isLoading]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('issamGPT:selectedModel', selectedModel);
+  }, [selectedModel]);
+
+  useEffect(() => {
+    if (!isModelMenuOpen) return undefined;
+
+    const onPointerDown = (event) => {
+      const target = event.target;
+      if (!modelPickerRef.current || modelPickerRef.current.contains(target)) return;
+      setIsModelMenuOpen(false);
+    };
+
+    const onEscape = (event) => {
+      if (event.key === 'Escape') {
+        setIsModelMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown, { passive: true });
+    document.addEventListener('keydown', onEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onEscape);
+    };
+  }, [isModelMenuOpen]);
 
   useLayoutEffect(() => {
     const formEl = inputFormRef.current;
@@ -948,6 +1040,7 @@ function App() {
     };
 
     if (clearComposer) setInput('');
+    setIsModelMenuOpen(false);
     setIsLoading(true);
     setFollowUpSpacerPx(shouldAlignUserMessageTop && appendUser ? computeFollowUpSpacerPx() : 0);
     shouldStickToBottomRef.current = !shouldAlignUserMessageTop;
@@ -984,11 +1077,15 @@ function App() {
       const response = await fetch(`${API_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages, searchEnabled: true }),
+        body: JSON.stringify({
+          messages: apiMessages,
+          searchEnabled: true,
+          model: selectedModel,
+        }),
       });
 
       if (!response.ok) {
-        throw new Error(`?쒕쾭 ?ㅻ쪟: ${response.status}`);
+        throw new Error(`서버 오류: ${response.status}`);
       }
 
       const reader = response.body.getReader();
@@ -1099,7 +1196,7 @@ function App() {
             }
 
             if (parsed.type === 'thinking_text') {
-              // Thinking ?⑤꼸? ?꾨줎?몄쓽 媛꾧껐???곹깭 臾멸뎄留??몄텧?⑸땲??
+              // Thinking 패널에는 현재 진행 상태만 노출합니다.
               continue;
             }
 
@@ -1469,6 +1566,50 @@ function App() {
               </div>
 
               <div className="input-action-group">
+                <div
+                  ref={modelPickerRef}
+                  className={`model-picker ${isModelMenuOpen ? 'open' : ''}`}
+                >
+                  <button
+                    type="button"
+                    className="model-picker-btn"
+                    aria-haspopup="listbox"
+                    aria-expanded={isModelMenuOpen}
+                    aria-label="모델 선택"
+                    onClick={() => setIsModelMenuOpen((prev) => !prev)}
+                  >
+                    <span className="model-picker-label">{selectedModel}</span>
+                    <span className="model-picker-chevron" aria-hidden="true">▾</span>
+                  </button>
+
+                  {isModelMenuOpen && (
+                    <div className="model-menu" role="listbox" aria-label="모델 목록">
+                      {MODEL_GROUPS.map((group) => (
+                        <section key={group.id} className="model-menu-group" aria-label={group.label}>
+                          <p className="model-menu-group-title">{group.label}</p>
+                          <div className="model-menu-options">
+                            {group.models.map((modelName) => (
+                              <button
+                                key={modelName}
+                                type="button"
+                                role="option"
+                                aria-selected={selectedModel === modelName}
+                                className={`model-option ${selectedModel === modelName ? 'active' : ''}`}
+                                onClick={() => {
+                                  setSelectedModel(modelName);
+                                  setIsModelMenuOpen(false);
+                                }}
+                              >
+                                {modelName}
+                              </button>
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <button type="submit" className="generate-btn" aria-label="생성하기" disabled={isLoading || !input.trim()}>
                   <span>생성하기</span>
                   <span className="generate-btn-icon" aria-hidden="true"><SidebarIcon name="spark" /></span>
