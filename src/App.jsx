@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import ChatMessage from './components/ChatMessage';
 import TaskPanel from './components/TaskPanel';
@@ -7,9 +7,10 @@ import { getFaviconUrl } from './utils/favicon';
 import './App.css';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-const TYPING_SPEED = 4;
-const CHARS_PER_TICK = 18;
-const MIN_BUFFER_BEFORE_TYPING = 240;
+const TYPING_SPEED = 16;
+const CHARS_PER_TICK = 1;
+const MIN_BUFFER_BEFORE_TYPING = 24;
+const COMPOSER_CLEARANCE_PX = 8;
 
 const STATUS_STEP_DELAY_MS = {
   analyze_intent: 450,
@@ -44,7 +45,7 @@ const PIPELINE_TEMPLATE = [
   { id: 'decide_search', label: '검색 필요 여부 판단', status: 'pending' },
   { id: 'plan_queries', label: 'Todo 리스트 작성', status: 'pending' },
   { id: 'search_1', label: '1차 웹검색 실행', status: 'pending', sources: [] },
-  { id: 'analyze_results', label: '검색 결과 검토', status: 'pending' },
+  { id: 'analyze_results', label: '\uac80\uc0c9 \uacb0\uacfc \uac80\ud1a0', status: 'pending' },
   { id: 'search_2', label: '2차 웹검색 실행', status: 'pending', sources: [] },
   { id: 'synthesize', label: '답변 구조 설계', status: 'pending' },
   { id: 'generate', label: '답변 작성', status: 'pending' },
@@ -57,8 +58,8 @@ const SIDEBAR_NAV_ITEMS = [
   { key: 'work-reduce', label: '업무 경감', icon: 'brief', active: false },
   { key: 'ai-box', label: 'AI Box', icon: 'box', active: false },
   { key: 'ai-mart', label: 'AI Mart', icon: 'mart', active: false },
-  { key: 'archive', label: '내 자료함', icon: 'archive', active: false },
-  { key: 'class', label: '클래스', icon: 'classroom', active: false },
+  { key: 'archive', label: '\ub0b4 \uc790\ub8cc\ud568', icon: 'archive', active: false },
+  { key: 'class', label: '\ud074\ub798\uc2a4', icon: 'classroom', active: false },
 ];
 
 const DEFAULT_HISTORY = [
@@ -70,7 +71,7 @@ const DEFAULT_HISTORY = [
 function truncateLabel(text, max = 26) {
   if (!text) return '';
   if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}…`;
+  return `${text.slice(0, max - 1)}...`;
 }
 
 function SidebarIcon({ name, className = '' }) {
@@ -367,7 +368,7 @@ function stripInlineSourceSections(content) {
   });
 
   const sourceHeadingRegex = /^(?:#{1,6}\s*)?출처\s*[:：]?\s*$/i;
-  const inlineSourceRegex = /^(?:[-*]\s*)?출처\s*[:：]\s*.+$/i;
+  const inlineSourceRegex = /^(?:[-*]\s*)?출처\s*[:：]?\s*.+$/i;
   const sourceItemRegex =
     /^(?:[-*]|\d+[.)])\s+(?:\[[^\]]+\]\(\s*https?:\/\/[^\s)]+(?:\s+"[^"]*")?\s*\)|https?:\/\/\S+|.+\s-\shttps?:\/\/\S+)\s*$/i;
   const linkOnlyRegex = /^\[[^\]]+\]\(\s*https?:\/\/[^\s)]+(?:\s+"[^"]*")?\s*\)\s*$/i;
@@ -433,10 +434,13 @@ function App() {
   const [detailPanelData, setDetailPanelData] = useState(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(true);
+  const [composerReservePx, setComposerReservePx] = useState(212);
+  const [followUpTopAlignPending, setFollowUpTopAlignPending] = useState(false);
   const activityIdRef = useRef(0);
   const currentQuestionRef = useRef('');
 
   const inputRef = useRef(null);
+  const inputFormRef = useRef(null);
   const chatContainerRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
 
@@ -455,6 +459,34 @@ function App() {
     if (!shouldStickToBottomRef.current) return;
     container.scrollTop = container.scrollHeight;
   }, [messages, isLoading]);
+
+  useLayoutEffect(() => {
+    const formEl = inputFormRef.current;
+    if (!formEl) return undefined;
+
+    const updateReserve = () => {
+      const h = Math.ceil(formEl.getBoundingClientRect().height || 0);
+      const next = Math.max(160, h + COMPOSER_CLEARANCE_PX);
+      setComposerReservePx((prev) => (Math.abs(prev - next) > 1 ? next : prev));
+    };
+
+    updateReserve();
+    window.addEventListener('resize', updateReserve);
+
+    if (typeof ResizeObserver === 'undefined') {
+      return () => window.removeEventListener('resize', updateReserve);
+    }
+
+    const observer = new ResizeObserver(() => {
+      updateReserve();
+    });
+    observer.observe(formEl);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateReserve);
+    };
+  }, []);
 
   const handleChatScroll = () => {
     const container = chatContainerRef.current;
@@ -478,7 +510,7 @@ function App() {
 
     container.scrollTo({
       top: Math.max(0, nextTop),
-      behavior: 'smooth',
+      behavior: 'auto',
     });
   };
 
@@ -653,31 +685,31 @@ function App() {
   const setStatusNarration = (status) => {
     switch (status) {
       case 'analyze_intent':
-        setStepNoteIfEmpty('analyze_intent', '사용자 요청을 접수하고 핵심 의도를 분석하는 중');
+        setStepNoteIfEmpty('analyze_intent', '\uc0ac\uc6a9\uc790 \uc694\uccad\uc744 \ubd84\uc11d\ud558\uace0 \ud575\uc2ec \uc758\ub3c4\ub97c \uc815\ub9ac\ud558\ub294 \uc911');
         break;
       case 'decide_search':
-        setStepNoteIfEmpty('decide_search', '최신성/사실성 기준으로 웹검색 필요 여부를 판단하는 중');
+        setStepNoteIfEmpty('decide_search', '\ucd5c\uc2e0 \uadfc\uac70 \ud655\uc778\uc774 \ud544\uc694\ud55c\uc9c0 \ud310\ub2e8\ud558\ub294 \uc911');
         break;
       case 'plan_queries':
-        setStepNoteIfEmpty('plan_queries', '실행 순서를 포함한 Todo 리스트를 구성하는 중');
+        setStepNoteIfEmpty('plan_queries', '\uc2e4\ud589 \uc21c\uc11c\ub97c \ud3ec\ud568\ud55c Todo \ub9ac\uc2a4\ud2b8\ub97c \uad6c\uc131\ud558\ub294 \uc911');
         break;
       case 'searching':
-        setStepNoteIfEmpty('search_1', 'Todo 1단계: 1차 웹검색을 실행하는 중');
+        setStepNoteIfEmpty('search_1', 'Todo 1\ub2e8\uacc4: 1\ucc28 \uc6f9\uac80\uc0c9\uc744 \uc2e4\ud589\ud558\ub294 \uc911');
         upsertThinkingProgress('searching', '웹검색을 실행하고 있습니다.', { spinning: true });
         break;
       case 'analyzing':
-        setStepNoteIfEmpty('analyze_results', 'Todo 2단계: 검색 결과의 신뢰성과 누락 정보를 검토하는 중');
+        setStepNoteIfEmpty('analyze_results', 'Todo 2\ub2e8\uacc4: \uac80\uc0c9 \uacb0\uacfc\ub97c \uac80\ud1a0\ud558\uace0 \ub204\ub77d \uc815\ubcf4\ub97c \ud655\uc778\ud558\ub294 \uc911');
         upsertThinkingProgress('analyzing', '검색 결과를 분석하고 있습니다.');
         break;
       case 'searching_2':
-        setStepNoteIfEmpty('search_2', 'Todo 3단계: 2차 웹검색을 실행하는 중');
+        setStepNoteIfEmpty('search_2', 'Todo 3\ub2e8\uacc4: 2\ucc28 \uc6f9\uac80\uc0c9\uc744 \uc2e4\ud589\ud558\ub294 \uc911');
         upsertThinkingProgress('searching_2', '누락 정보를 보강하기 위해 추가 검색 중입니다.', { spinning: true });
         break;
       case 'synthesize':
-        setStepNoteIfEmpty('synthesize', '수집 근거를 바탕으로 답변 구조를 설계하는 중');
+        setStepNoteIfEmpty('synthesize', '\uc218\uc9d1\ud55c \uadfc\uac70\ub97c \ubc14\ud0d5\uc73c\ub85c \ub2f5\ubcc0 \uad6c\uc870\ub97c \uc124\uacc4\ud558\ub294 \uc911');
         break;
       case 'thinking':
-        setStepNoteIfEmpty('generate', '최종 답변을 작성하는 중');
+        setStepNoteIfEmpty('generate', '\uc2e0\uc911\ud558\uac8c \ub2f5\ubcc0\uc744 \uc815\ub9ac\ud558\ub294 \uc911');
         upsertThinkingProgress('thinking', '신중하게 생각해서 답변을 정리하고 있습니다.', { spinning: true });
         break;
       case 'streaming':
@@ -708,7 +740,7 @@ function App() {
           await sleep(delay);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   };
 
   const completePipeline = () => {
@@ -721,7 +753,7 @@ function App() {
         if (
           nextStep.id === 'generate' &&
           nextStep.status === 'completed' &&
-          (!nextStep.note || nextStep.note === '최종 답변을 작성하는 중')
+          (!nextStep.note || nextStep.note === '\uc2e0\uc911\ud558\uac8c \ub2f5\ubcc0\uc744 \uc815\ub9ac\ud558\ub294 \uc911')
         ) {
           nextStep = { ...nextStep, note: '답변 작성 완료' };
         }
@@ -792,10 +824,10 @@ function App() {
     });
 
     const stageKey = round === 2 ? 'searching_2' : 'searching';
-    const queryText = payload.query?.trim() || '검색 쿼리';
+    const queryText = payload.query?.trim() || '\uac80\uc0c9 \ucffc\ub9ac';
     upsertThinkingProgress(
       stageKey,
-      `웹검색 실행 결과: "${queryText}" 기준 출처 ${sources.length}개를 확보했습니다.`,
+      `\uc6f9\uac80\uc0c9 \uc2e4\ud589 \uacb0\uacfc: "${queryText}" \uae30\uc900 \uc774\ubc88 \ucffc\ub9ac \ucd9c\ucc98 ${sources.length}\uac1c\ub97c \ud655\ubcf4\ud588\uc2b5\ub2c8\ub2e4.`, 
       { spinning: false },
     );
 
@@ -896,6 +928,7 @@ function App() {
 
     if (clearComposer) setInput('');
     setIsLoading(true);
+    setFollowUpTopAlignPending(Boolean(shouldAlignUserMessageTop && appendUser));
     shouldStickToBottomRef.current = !shouldAlignUserMessageTop;
 
     typeBufferRef.current = '';
@@ -934,7 +967,7 @@ function App() {
       });
 
       if (!response.ok) {
-        throw new Error(`서버 오류: ${response.status}`);
+        throw new Error(`?쒕쾭 ?ㅻ쪟: ${response.status}`);
       }
 
       const reader = response.body.getReader();
@@ -1045,7 +1078,7 @@ function App() {
             }
 
             if (parsed.type === 'thinking_text') {
-              // Thinking 패널은 프론트의 간결한 상태 문구만 노출합니다.
+              // Thinking ?⑤꼸? ?꾨줎?몄쓽 媛꾧껐???곹깭 臾멸뎄留??몄텧?⑸땲??
               continue;
             }
 
@@ -1098,6 +1131,7 @@ function App() {
       await statusSequenceRef.current;
       completePipeline();
       finalizeLatestAssistant();
+      setFollowUpTopAlignPending(false);
       setIsLoading(false);
       inputRef.current?.focus();
     }
@@ -1156,7 +1190,10 @@ function App() {
   const historyItems = firstPrompt ? [firstPrompt] : DEFAULT_HISTORY;
 
   return (
-    <div className={`app-layout ${detailPanelData ? 'panel-open' : ''} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+    <div
+      className={`app-layout ${detailPanelData ? 'panel-open' : ''} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}
+      style={{ '--composer-reserve': `${composerReservePx}px` }}
+    >
       <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-inner">
           <div className="brand-row">
@@ -1264,7 +1301,7 @@ function App() {
         <div className="sidebar-profile">
           <div className="sidebar-profile-main">
             <div className="sidebar-user-row">
-              <span className="sidebar-user-name">이쌤</span>
+              <span className="sidebar-user-name">issam</span>
               <span className="sidebar-pro-badge">Pro</span>
             </div>
             <p className="sidebar-school">서울교육고등학교</p>
@@ -1280,7 +1317,7 @@ function App() {
           {messages.length === 0 ? (
             <div className="empty-state">
               <p className="empty-title">교사를 위한 AI 비서, issamGPT</p>
-              <p className="empty-sub">수업 준비, 문서 작성, 학급 운영 업무를 빠르게 도와드립니다.</p>
+              <p className="empty-sub">수업 준비, 문서 작성, 학급 운영 업무를 빠르고 정확하게 도와드립니다.</p>
             </div>
           ) : (
             <div className="messages">
@@ -1318,8 +1355,8 @@ function App() {
                         <button
                           type="button"
                           className="answer-action-btn"
-                          aria-label="답변 재생성"
-                          title="답변 재생성"
+                          aria-label="Regenerate answer"
+                          title="Regenerate answer"
                           onClick={() => handleRegenerateAnswer(idx)}
                           disabled={isLoading || idx !== messages.length - 1}
                         >
@@ -1357,7 +1394,7 @@ function App() {
                               onClick={() => handleFollowUpClick(question)}
                               disabled={isLoading}
                             >
-                              <span className="followup-icon" aria-hidden="true">◌</span>
+                              <span className="followup-icon" aria-hidden="true">?</span>
                               <span className="followup-text">{question}</span>
                               <span className="followup-arrow" aria-hidden="true">→</span>
                             </button>
@@ -1367,12 +1404,13 @@ function App() {
                     )}
                 </div>
               ))}
+              {followUpTopAlignPending && <div className="followup-top-align-spacer" aria-hidden="true" />}
             </div>
           )}
         </main>
 
         <footer className="input-area">
-          <form onSubmit={handleSubmit} className="input-form">
+          <form ref={inputFormRef} onSubmit={handleSubmit} className="input-form">
             <div className="input-hint-bar">
               <span className="input-hint-icon" aria-hidden="true"><SidebarIcon name="pencil" /></span>
               <span>오늘은 어떤 도움을 드릴까요?</span>
@@ -1425,3 +1463,5 @@ function App() {
 }
 
 export default App;
+
+

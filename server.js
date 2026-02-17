@@ -16,6 +16,7 @@ const {
   GLM4_MODEL = 'glm-5',
   ORCHESTRATOR_MODEL = process.env.GLM_ORCHESTRATOR_MODEL || 'glm-4.7-flash',
   RESPONSE_MODEL = process.env.GLM_RESPONSE_MODEL || GLM4_MODEL,
+  FOLLOWUP_MODEL = process.env.GLM_FOLLOWUP_MODEL || 'glm-4.7-flash',
   TAVILY_API_KEY,
   PORT = 3001,
 } = process.env;
@@ -317,6 +318,62 @@ const KOREAN_REQUEST_ENDINGS =
   /(알려줘|알려주세요|찾아줘|검색해줘|정리해줘|요약해줘|설명해줘|만들어줘|추천해줘|해줘|해주세요|해줄래|부탁해)$/i;
 const EN_REQUEST_PHRASES =
   /\b(please|tell me|show me|help me|can you|could you|how to|what is|explain)\b/i;
+const REQUEST_TOKEN_PATTERNS = [
+  /알려|검색|찾아|정리|요약|설명|만들|추천|가르쳐|작성|작성해|해줘|해주세요|부탁/i,
+  /how|what|why|please|show|tell|explain|guide/i,
+];
+const QUERY_STOPWORD_TOKENS = new Set([
+  '관련',
+  '관련한',
+  '관련해서',
+  '관한',
+  '대한',
+  '대해',
+  '방법',
+  '위한',
+  '위해',
+  '도입과',
+  '도입',
+]);
+
+function normalizeKeywordToken(token) {
+  let next = toStringSafe(token)
+    .replace(/^[^0-9A-Za-z가-힣]+|[^0-9A-Za-z가-힣]+$/g, '')
+    .trim();
+  if (!next) return '';
+
+  // strip common Korean particles to make keyword-style phrases
+  next = next.replace(
+    /(으로|로|에서|에게|한테|부터|까지|보다|처럼|만큼|라도|이나|나|와|과|의|도|만|은|는|이|가|을|를)$/u,
+    '',
+  );
+  return next.trim();
+}
+
+function compactKeywordQuery(text, maxTokens = 7) {
+  const tokens = toStringSafe(text)
+    .replace(/[\n\r]+/g, ' ')
+    .replace(/[“”"'`]/g, '')
+    .split(/\s+/)
+    .map((token) => normalizeKeywordToken(token))
+    .filter(Boolean)
+    .filter((token) => token.length > 1)
+    .filter((token) => !QUERY_STOPWORD_TOKENS.has(token))
+    .filter((token) => !REQUEST_TOKEN_PATTERNS.some((pattern) => pattern.test(token)));
+
+  if (!tokens.length) return '';
+
+  const dedup = [];
+  const seen = new Set();
+  tokens.forEach((token) => {
+    const key = token.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    dedup.push(token);
+  });
+
+  return dedup.slice(0, maxTokens).join(' ').slice(0, 90).trim();
+}
 
 function keywordizeQueryText(text) {
   let q = toStringSafe(text)
@@ -340,6 +397,13 @@ function keywordizeQueryText(text) {
 
   q = q.replace(/\s+/g, ' ').trim();
   if (!q) return '';
+
+  // Prefer compact keyword-style query if the phrase still looks like a sentence.
+  if (isSentenceLikeSearchQuery(q) || q.split(/\s+/).filter(Boolean).length > 7) {
+    const compact = compactKeywordQuery(q, 7);
+    if (compact) q = compact;
+  }
+
   return q.slice(0, 90).trim();
 }
 
@@ -378,6 +442,20 @@ function hardenSearchQuery(query, userQuery, mode = 'primary') {
   if (isQueryTooSimilarToUser(next, userQuery)) {
     const suffix = mode === 'followup' ? ' 추가 근거' : ' 최신 자료';
     next = `${next} ${suffix}`.trim();
+  }
+
+  if (isSentenceLikeSearchQuery(next) || next.split(/\s+/).filter(Boolean).length > 7) {
+    const compact = compactKeywordQuery(next, mode === 'followup' ? 8 : 7);
+    if (compact) next = compact;
+  }
+
+  if (isQueryTooSimilarToUser(next, userQuery)) {
+    const compactUser = compactKeywordQuery(userQuery, mode === 'followup' ? 8 : 7);
+    if (compactUser) {
+      next = `${compactUser} ${mode === 'followup' ? '심화 정보' : '핵심 정리'}`.trim();
+    } else {
+      next = `${next} ${mode === 'followup' ? '심화 정보' : '핵심 정리'}`.trim();
+    }
   }
 
   return next.slice(0, 90).trim();
@@ -425,6 +503,31 @@ function normalizeFollowUpQuestions(rawQuestions, userQuery) {
     });
 
   return out.slice(0, 3);
+}
+
+function areFollowUpsTemplateLike(questions, userQuery) {
+  if (!Array.isArray(questions) || questions.length < 3) return true;
+
+  const fallbackNorm = new Set(
+    buildFollowUpFallback(userQuery).map((item) => normalizeForCompare(item)),
+  );
+  const normalized = questions.map((item) => normalizeForCompare(item));
+
+  let fallbackMatches = 0;
+  normalized.forEach((item) => {
+    if (fallbackNorm.has(item)) fallbackMatches += 1;
+  });
+
+  // treat as template when most outputs match fallback or share highly repetitive endings
+  if (fallbackMatches >= 2) return true;
+  const repetitive = normalized.filter(
+    (item) =>
+      item.includes('단계별 실행 체크리스트') ||
+      item.includes('우선순위 높은 작업 5가지만') ||
+      item.includes('자주 막히는 지점과 해결법'),
+  ).length;
+
+  return repetitive >= 2;
 }
 
 async function callGlmJson(
@@ -842,6 +945,13 @@ async function optimizeSearchQueries({ userQuery, queries, mode = 'primary', max
 
     const optimized = enforceOptimizedQueryQuality(rewritten?.queries, userQuery, mode, maxQueries);
     const hardened = enforceOptimizedQueryQuality(optimized, userQuery, mode, maxQueries);
+
+    const finalQueries = normalizeQueryArray(
+      hardened.map((q) => hardenSearchQuery(q, userQuery, mode)).filter(Boolean),
+      maxQueries,
+    );
+    if (finalQueries.length > 0) return finalQueries;
+
     return hardened.length > 0 ? hardened : qualityFallback;
   } catch (err) {
     console.error('Search query optimizer error:', err.message);
@@ -970,19 +1080,66 @@ async function generateFollowUpQuestions({ userQuery, answerText }) {
 
   try {
     const parsed = await callGlmJson(messages, {
-      model: ORCHESTRATOR_MODEL,
-      maxTokens: 160,
-      timeoutMs: 4500,
+      model: FOLLOWUP_MODEL,
+      maxTokens: 220,
+      timeoutMs: 9000,
       temperature: 0.35,
       disableThinking: true,
     });
 
     const normalized = normalizeFollowUpQuestions(parsed?.questions, userQuery);
-    return normalized.length > 0 ? normalized : fallback;
+    if (normalized.length >= 3 && !areFollowUpsTemplateLike(normalized, userQuery)) {
+      return normalized;
+    }
   } catch (err) {
     console.error('Follow-up generation error:', err.message);
-    return fallback;
   }
+
+  // Retry with plain-text output in case JSON parsing is unstable.
+  try {
+    const retryMessages = [
+      {
+        role: 'system',
+        content: [
+          '한국어 후속 질문 3개를 생성하세요.',
+          '각 줄에 질문 1개씩, 총 3줄만 출력하세요.',
+          '번호/불릿/마크다운/설명 없이 질문 문장만 출력하세요.',
+          '사용자 원문을 그대로 반복하지 마세요.',
+        ].join('\n'),
+      },
+      {
+        role: 'user',
+        content: [
+          `사용자 질문: ${toStringSafe(userQuery).slice(0, 240)}`,
+          `답변 요약: ${trimmedAnswer || '(empty)'}`,
+          '조건: 실행 가능한 후속 질문, 서로 중복 금지.',
+        ].join('\n'),
+      },
+    ];
+
+    const raw = await callGlmText(retryMessages, {
+      model: FOLLOWUP_MODEL,
+      maxTokens: 220,
+      timeoutMs: 9000,
+      temperature: 0.35,
+      disableThinking: true,
+    });
+
+    const fromText = toStringSafe(raw)
+      .replace(/```[\s\S]*?```/g, '')
+      .split('\n')
+      .map((line) => line.replace(/^[\-\d.)\s]+/, '').trim())
+      .filter(Boolean);
+
+    const normalizedRetry = normalizeFollowUpQuestions(fromText, userQuery);
+    if (normalizedRetry.length >= 3 && !areFollowUpsTemplateLike(normalizedRetry, userQuery)) {
+      return normalizedRetry;
+    }
+  } catch (err) {
+    console.error('Follow-up generation retry error:', err.message);
+  }
+
+  return fallback;
 }
 
 async function shouldDoSecondSearch(userQuery, searchPlan, firstRoundEntries) {
@@ -1187,6 +1344,16 @@ app.post('/api/chat', async (req, res) => {
       if (optimizedPrimaryQueries.length > 0) {
         searchPlan = { ...searchPlan, primaryQueries: optimizedPrimaryQueries };
       }
+
+      const hardenedPrimaryQueries = enforceOptimizedQueryQuality(
+        searchPlan.primaryQueries,
+        lastMessage.content,
+        'primary',
+        searchPlan.mode === 'multi' ? 3 : 1,
+      );
+      if (hardenedPrimaryQueries.length > 0) {
+        searchPlan = { ...searchPlan, primaryQueries: hardenedPrimaryQueries };
+      }
     }
 
     const initialTodoIntro = await generateInitialTodoIntro({
@@ -1257,6 +1424,16 @@ app.post('/api/chat', async (req, res) => {
           });
           if (optimizedRefinedQueries.length > 0) {
             secondDecision = { ...secondDecision, refinedQueries: optimizedRefinedQueries };
+          }
+
+          const hardenedRefinedQueries = enforceOptimizedQueryQuality(
+            secondDecision.refinedQueries,
+            lastMessage.content,
+            'followup',
+            2,
+          );
+          if (hardenedRefinedQueries.length > 0) {
+            secondDecision = { ...secondDecision, refinedQueries: hardenedRefinedQueries };
           }
         }
         sendSSE(res, 'search_decision', secondDecision);

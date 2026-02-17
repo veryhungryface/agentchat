@@ -112,7 +112,7 @@ function ChatMessage({ message, isStreaming }) {
         <div className="assistant-meta">
           <span className="assistant-meta-logo" aria-hidden="true">✺</span>
           <span className="assistant-meta-name">
-            issamGPT <span className="assistant-meta-tier">Lite</span>
+            issamGPT <span className="assistant-meta-tier">Pro</span>
           </span>
         </div>
       )}
