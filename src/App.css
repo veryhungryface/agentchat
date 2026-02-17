@@ -651,6 +651,25 @@
   line-height: 24px;
 }
 
+.markdown-body details {
+  margin: 12px 0;
+  border: 1px solid #efefef;
+  border-radius: 10px;
+  background: #fafafa;
+  padding: 8px 12px;
+}
+
+.markdown-body summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #222;
+  outline: none;
+}
+
+.markdown-body details > :not(summary) {
+  margin-top: 8px;
+}
+
 .markdown-body code {
   background: #f6f6f7;
   color: #222;

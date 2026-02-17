@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import rehypeRaw from 'rehype-raw';
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash';
@@ -98,8 +99,8 @@ function MarkdownCode({ inline, className, children, ...props }) {
           customStyle={{ margin: 0, background: 'transparent', padding: '14px 16px', borderRadius: 0 }}
           codeTagProps={{
             style: {
-              fontSize: '0.94rem',
-              lineHeight: 1.58,
+              fontSize: '0.88rem',
+              lineHeight: 1.5,
               background: 'transparent',
               borderRadius: 0,
               padding: 0,
@@ -135,7 +136,7 @@ function ChatMessage({ message, isStreaming }) {
             <div className="markdown-body">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkMath]}
-                rehypePlugins={[rehypeKatex]}
+                rehypePlugins={[rehypeRaw, rehypeKatex]}
                 components={{ code: MarkdownCode }}
               >
                 {message.content}

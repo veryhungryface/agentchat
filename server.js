@@ -61,8 +61,8 @@ const SECOND_SEARCH_FALLBACK = {
 };
 
 const SEARCH_RESULT_LIMITS = {
-  primary: { min: 3, max: 20, defaultSingle: 6, defaultMulti: 6 },
-  followup: { min: 5, max: 25, default: 12 },
+  primary: { min: 3, max: 10, defaultSingle: 6, defaultMulti: 6 },
+  followup: { min: 5, max: 10, default: 10 },
 };
 
 function sendSSE(res, type, data) {
@@ -177,16 +177,11 @@ function extractFirstJsonObject(text) {
   return null;
 }
 
-function normalizeSearchPlan(plan, originalQuery) {
-  const safeQuery = toStringSafe(originalQuery).trim();
-
+function normalizeSearchPlan(plan, _originalQuery) {
   if (!plan || typeof plan !== 'object') {
     return {
       ...SEARCH_PLAN_FALLBACK,
-      primaryQueries: safeQuery ? [safeQuery] : [],
-      shouldSearch: Boolean(safeQuery),
-      mode: safeQuery ? 'single' : 'none',
-      primaryResultCount: safeQuery ? SEARCH_RESULT_LIMITS.primary.defaultSingle : 0,
+      reason: 'Planner fallback: invalid planner output, defaulting to no-search.',
     };
   }
 
@@ -1055,7 +1050,7 @@ async function buildInitialSearchPlan(userQuery, conversationMessages) {
         '- primaryQueries should be 0 items if mode=none, 1 item for single, up to 3 items for multi.',
         '- primaryResultCount is per-query max_results for first-round retrieval.',
         '- primaryResultCount must be chosen by difficulty/uncertainty, not fixed.',
-        '- Simple lookup usually 4~8, broader or fast-changing topics can be 10~20.',
+        '- Simple lookup usually 4~8, broader or fast-changing topics can be up to 10.',
         '',
         'Return JSON schema exactly:',
         '{"shouldSearch": boolean, "mode": "none"|"single"|"multi", "primaryQueries": string[], "primaryResultCount": number, "reason": string}',
@@ -1340,7 +1335,7 @@ async function shouldDoSecondSearch(userQuery, searchPlan, firstRoundEntries) {
         '{"needsMore": boolean, "refinedQueries": string[], "additionalResultCount": number, "reason": string}',
         'If needsMore=false, refinedQueries must be empty.',
         'If needsMore=true, provide 1-2 concise refined queries.',
-        'If needsMore=true, additionalResultCount should adapt to remaining gaps (usually 8~20, can be higher when needed).',
+        'If needsMore=true, additionalResultCount should adapt to remaining gaps (usually 6~10).',
       ].join('\n'),
     },
   ];

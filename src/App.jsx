@@ -724,6 +724,17 @@ function App() {
     });
   };
 
+  const setProgressSpinning = (stage, spinning) => {
+    updatePipeline((pipeline) => {
+      pipeline.activity = (pipeline.activity || []).map((item) => {
+        if (item.type !== 'progress' || item.stage !== stage) return item;
+        if (Boolean(item.spinning) === Boolean(spinning)) return item;
+        return { ...item, spinning: Boolean(spinning) };
+      });
+      return pipeline;
+    });
+  };
+
   const upsertThinkingSources = ({ groupId, label, sources, query }) => {
     if (!sources?.length) return;
 
@@ -808,19 +819,31 @@ function App() {
         upsertThinkingProgress('searching', '웹검색을 실행하고 있습니다.', { spinning: true });
         break;
       case 'analyzing':
+        setProgressSpinning('searching', false);
+        setProgressSpinning('searching_2', false);
         setStepNoteIfEmpty('analyze_results', 'Todo 2\ub2e8\uacc4: \uac80\uc0c9 \uacb0\uacfc\ub97c \uac80\ud1a0\ud558\uace0 \ub204\ub77d \uc815\ubcf4\ub97c \ud655\uc778\ud558\ub294 \uc911');
         upsertThinkingProgress('analyzing', '검색 결과를 분석하고 있습니다.');
         break;
       case 'searching_2':
+        setProgressSpinning('searching', false);
         setStepNoteIfEmpty('search_2', 'Todo 3\ub2e8\uacc4: 2\ucc28 \uc6f9\uac80\uc0c9\uc744 \uc2e4\ud589\ud558\ub294 \uc911');
         upsertThinkingProgress('searching_2', '누락 정보를 보강하기 위해 추가 검색 중입니다.', { spinning: true });
         break;
       case 'synthesize':
+        setProgressSpinning('searching', false);
+        setProgressSpinning('searching_2', false);
         setStepNoteIfEmpty('synthesize', '\uc218\uc9d1\ud55c \uadfc\uac70\ub97c \ubc14\ud0d5\uc73c\ub85c \ub2f5\ubcc0 \uad6c\uc870\ub97c \uc124\uacc4\ud558\ub294 \uc911');
         break;
       case 'thinking':
+        setProgressSpinning('searching', false);
+        setProgressSpinning('searching_2', false);
         setStepNoteIfEmpty('generate', '\uc2e0\uc911\ud558\uac8c \ub2f5\ubcc0\uc744 \uc815\ub9ac\ud558\ub294 \uc911');
         upsertThinkingProgress('thinking', '신중하게 생각해서 답변을 정리하고 있습니다.', { spinning: true });
+        break;
+      case 'search_skipped':
+      case 'search_failed':
+        setProgressSpinning('searching', false);
+        setProgressSpinning('searching_2', false);
         break;
       case 'streaming':
         break;
