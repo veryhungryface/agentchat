@@ -1,6 +1,8 @@
 ﻿import { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash';
@@ -13,6 +15,7 @@ import markup from 'react-syntax-highlighter/dist/esm/languages/prism/markup';
 import css from 'react-syntax-highlighter/dist/esm/languages/prism/css';
 import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql';
 import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml';
+import 'katex/dist/katex.min.css';
 
 SyntaxHighlighter.registerLanguage('bash', bash);
 SyntaxHighlighter.registerLanguage('javascript', javascript);
@@ -118,7 +121,11 @@ function ChatMessage({ message, isStreaming }) {
         {message.content ? (
           isUser ? message.content : (
             <div className="markdown-body">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: MarkdownCode }}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+                components={{ code: MarkdownCode }}
+              >
                 {message.content}
               </ReactMarkdown>
             </div>

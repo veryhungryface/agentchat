@@ -88,18 +88,26 @@ function SidebarIcon({ name, className = '' }) {
 
   if (name === 'collapse') {
     return (
-      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="6" y="5" width="3.2" height="14" rx="1.1" stroke="currentColor" strokeWidth="1.6" />
-        <rect x="14.8" y="5" width="3.2" height="14" rx="1.1" stroke="currentColor" strokeWidth="1.6" />
+      <svg className={cls} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect x="6" y="6" width="20" height="20" rx="3" stroke="currentColor" strokeWidth="2" />
+        <path d="M11 6V26" stroke="currentColor" strokeWidth="2" />
+        <path d="M19.8281 13.0002L16.9997 15.8286L19.8281 18.657" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+
+  if (name === 'home') {
+    return (
+      <svg className={cls} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M15.4268 6.62207C15.771 6.38119 16.229 6.38119 16.5732 6.62207L24.5732 12.2217C24.8405 12.4088 24.9999 12.7148 25 13.041V26H19.7275V21.5C19.7275 20.9478 19.2797 20.5001 18.7275 20.5H13.2725C12.7203 20.5001 12.2725 20.9478 12.2725 21.5V26H7V13.041C7.0001 12.7148 7.15951 12.4088 7.42676 12.2217L15.4268 6.62207Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
       </svg>
     );
   }
 
   if (name === 'compose') {
     return (
-      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="4.4" y="4.6" width="11.5" height="11.5" rx="2.2" stroke="currentColor" strokeWidth="1.6" />
-        <path d="M12.4 14.8 19 8.2l1.7 1.7-6.6 6.6-2.9.9.8-2.6Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <svg className={cls} viewBox="0 0 36 36" fill="none" aria-hidden="true">
+        <path d="M9 13.6C9 11.6118 10.6118 10 12.6 10H23.4C25.3882 10 27 11.6118 27 13.6V20.9C27 22.8882 25.3882 24.5 23.4 24.5H22.5L19.169 27.4979C18.5254 28.0771 17.5 27.6204 17.5 26.7546V24.5H12.6C10.6118 24.5 9 22.8882 9 20.9V13.6Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
       </svg>
     );
   }
@@ -134,58 +142,67 @@ function SidebarIcon({ name, className = '' }) {
 
   if (name === 'hwp') {
     return (
-      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="5" y="5" width="14" height="14" rx="2.4" stroke="currentColor" strokeWidth="1.6" />
-        <path d="M9 10.2h6M9 13h6M9 15.8h4.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <svg className={cls} viewBox="0 0 36 36" fill="none" aria-hidden="true">
+        <rect x="9" y="9" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M21.5 9H24C25.6569 9 27 10.3431 27 12V24C27 25.6569 25.6569 27 24 27H21.5C23.1405 26.4631 24.25 24.9326 24.25 23.2065V12.7935C24.25 11.0674 23.1405 9.53689 21.5 9Z" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M15.751 18.9746C15.6863 19.0045 15.6226 19.0369 15.5615 19.0732C15.1359 19.3265 14.7958 19.7571 14.7549 20.3301L14.751 20.4473L14.7549 20.5635C14.7958 21.1365 15.1359 21.5671 15.5615 21.8203C15.6234 21.8571 15.6884 21.8888 15.7539 21.9189C15.5075 21.8393 15.2957 21.7385 15.124 21.6182C14.7421 21.3504 14.5216 20.9814 14.5215 20.4473C14.5215 19.9129 14.742 19.5432 15.124 19.2754C15.2951 19.1555 15.5058 19.0541 15.751 18.9746ZM18.248 18.9746C18.4936 19.0541 18.7047 19.1553 18.876 19.2754C19.258 19.5432 19.4785 19.9129 19.4785 20.4473C19.4784 20.9814 19.2579 21.3504 18.876 21.6182C18.7041 21.7386 18.4919 21.8393 18.2451 21.9189C18.3109 21.8887 18.3763 21.8573 18.4385 21.8203C18.8924 21.5502 19.2489 21.0784 19.249 20.4473C19.249 19.8159 18.8925 19.3434 18.4385 19.0732C18.3771 19.0367 18.313 19.0046 18.248 18.9746ZM17 14.9004C17.0666 14.9004 17.1201 14.954 17.1201 15.0205V16.0234H20.0557C20.0802 16.0236 20.0996 16.0438 20.0996 16.0684C20.0995 16.0928 20.0801 16.1121 20.0557 16.1123H13.9443C13.9199 16.1121 13.9005 16.0928 13.9004 16.0684C13.9004 16.0438 13.9198 16.0236 13.9443 16.0234H16.8799V15.0205C16.8799 14.954 16.9334 14.9004 17 14.9004Z" stroke="currentColor" strokeWidth="1.8" />
       </svg>
     );
   }
 
   if (name === 'brief') {
     return (
-      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="4.5" y="7.4" width="15" height="11.2" rx="2.2" stroke="currentColor" strokeWidth="1.6" />
-        <path d="M9.2 7.3v-1a1.8 1.8 0 0 1 1.8-1.8h2a1.8 1.8 0 0 1 1.8 1.8v1" stroke="currentColor" strokeWidth="1.6" />
-        <path d="M4.5 11.8h15" stroke="currentColor" strokeWidth="1.6" />
+      <svg className={cls} viewBox="0 0 36 36" fill="none" aria-hidden="true">
+        <g clipPath="url(#clip0_1532_2384)">
+          <path d="M27.625 19.3137V15.08C27.625 14.4963 27.3748 13.9463 26.9196 13.5338L21.5379 8.64125C21.0896 8.23375 20.4709 8 19.837 8H16.2812C14.9544 8 13.875 8.98125 13.875 10.1875V18.41L12.5 18.2425V17.6875C12.5 17.3037 12.2429 16.9587 11.851 16.8175L8.4135 15.5675C8.09862 15.4525 7.737 15.4863 7.45237 15.6613C7.16912 15.8363 7 16.1263 7 16.4375V27.0625C7 27.3737 7.16912 27.6638 7.45237 27.8388C7.62562 27.9463 7.82913 28 8.03125 28C8.1605 28 8.28975 27.9775 8.4135 27.9325L11.851 26.6825C12.0944 26.5938 12.2759 26.4225 12.3859 26.2175L17.8364 27.8213C18.2063 27.94 18.6078 28 19.0312 28C19.7738 28 20.5011 27.8 21.1474 27.415L27.9495 23.2462C28.6081 22.8337 29 22.1575 29 21.4375V20.8125C29 20.0612 28.4032 19.4625 27.625 19.3137ZM24.1036 13.625H21.7812C21.5942 13.625 21.4375 13.4825 21.4375 13.3125V11.2013L24.1036 13.625ZM15.9375 10.1875C15.9375 10.0175 16.0942 9.875 16.2812 9.875H19.375V13.3125C19.375 14.5187 20.4544 15.5 21.7812 15.5H25.5625V19.585L20.6139 20.6912C20.3004 19.785 19.4438 19.0863 18.3713 18.9588L15.9375 18.6613V10.1875ZM10.4375 25.1775V17.8225L10.4375 18.3225V25.1775ZM26.9375 21.4375C26.9375 21.5875 26.8247 21.6738 26.7876 21.6975L20.0061 25.8537C19.5455 26.1275 18.9749 26.1975 18.4964 26.0463L12.5 24.28V20.1337L18.099 20.8163C18.429 20.855 18.6875 21.1288 18.6875 21.4375C18.6875 21.78 18.3823 22.06 17.9161 22.06C17.9134 22.06 17.9106 22.06 17.9079 22.06L16.4229 21.8725C15.8523 21.8012 15.338 22.1588 15.2583 22.6713C15.1799 23.1838 15.5731 23.6575 16.1382 23.7288L18 23.9375C19.0189 23.9375 19.8989 23.425 20.3746 22.675L26.9375 21.2012V21.4375Z" fill="currentColor" />
+        </g>
+        <defs>
+          <clipPath id="clip0_1532_2384">
+            <rect width="22" height="20" fill="white" transform="translate(7 8)" />
+          </clipPath>
+        </defs>
       </svg>
     );
   }
 
   if (name === 'box') {
     return (
-      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M4.7 8.4 12 4.8l7.3 3.6v7.2L12 19.2l-7.3-3.6V8.4Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-        <path d="M12 4.8v14.4M4.7 8.4 12 12l7.3-3.6" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <svg className={cls} viewBox="0 0 36 36" fill="none" aria-hidden="true">
+        <path d="M9 14.4395C9 13.8256 9 13.5186 9.09806 13.2338C9.19612 12.949 9.38512 12.707 9.76311 12.2232L10.419 11.3837C10.9499 10.7041 11.2153 10.3644 11.5889 10.1822C11.9624 10 12.3935 10 13.2559 10H22.8C23.6833 10 24.1249 10 24.505 10.19C24.885 10.3801 25.15 10.7334 25.68 11.44L26.28 12.24C26.6368 12.7158 26.8153 12.9537 26.9076 13.2308C27 13.5079 27 13.8053 27 14.4V15.8667V22.4C27 24.0971 27 24.9456 26.4728 25.4728C25.9456 26 25.0971 26 23.4 26H12.6C10.9029 26 10.0544 26 9.52721 25.4728C9 24.9456 9 24.0971 9 22.4V15.8667V14.4395Z" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M10.2028 11.6344L9.21758 12.8758C9.07668 13.0534 9 13.2734 9 13.5H27C27 13.2729 26.9258 13.052 26.7887 12.871L25.9107 11.7117C25.2743 10.8716 24.9562 10.4515 24.502 10.2258C24.0478 10 23.5208 10 22.4669 10H13.5866C12.5615 10 12.049 10 11.6039 10.215C11.1587 10.43 10.8401 10.8315 10.2028 11.6344Z" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M15.3018 17.0996H20.8018" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       </svg>
     );
   }
 
   if (name === 'mart') {
     return (
-      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M4.6 6.4h2.3l1.8 9h8.2l1.5-6.5H8.1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="10.1" cy="18.3" r="1.2" fill="currentColor" />
-        <circle cx="16.3" cy="18.3" r="1.2" fill="currentColor" />
+      <svg className={cls} viewBox="0 0 36 36" fill="none" aria-hidden="true">
+        <path d="M8.62127 16.4851C8.33529 15.3411 8.19229 14.7692 8.49257 14.3846C8.79285 14 9.38242 14 10.5616 14H25.4384C26.6176 14 27.2072 14 27.5074 14.3846C27.8077 14.7692 27.6647 15.3411 27.3787 16.4851L25.3787 24.4851C25.1968 25.2126 25.1059 25.5764 24.8346 25.7882C24.5634 26 24.1884 26 23.4384 26H12.5616C11.8116 26 11.4366 26 11.1654 25.7882C10.8941 25.5764 10.8032 25.2126 10.6213 24.4851L8.62127 16.4851Z" fill="white" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M10 18H26" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M13 13.4639L15 9.99977" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M23 13.4639L21 9.99977" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       </svg>
     );
   }
 
   if (name === 'archive') {
     return (
-      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="4.8" y="5.2" width="14.4" height="4.2" rx="1.4" stroke="currentColor" strokeWidth="1.6" />
-        <path d="M6.2 9.4h11.6V18a2 2 0 0 1-2 2H8.2a2 2 0 0 1-2-2V9.4Z" stroke="currentColor" strokeWidth="1.6" />
-        <path d="M10 13h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <svg className={cls} viewBox="0 0 36 36" fill="none" aria-hidden="true">
+        <rect width="36" height="36" rx="4" fill="transparent" />
+        <path d="M9 13.1999C9 11.8882 9 11.2323 9.32553 10.7674C9.44596 10.5954 9.59556 10.4458 9.76756 10.3254C10.2325 9.99987 10.8883 9.99987 12.2 9.99987H19.8C21.1117 9.99987 21.7675 9.99987 22.2324 10.3254C22.4044 10.4458 22.554 10.5954 22.6745 10.7674C23 11.2323 23 11.8882 23 13.1999V15.8665V22.3999C23 24.0969 23 24.9455 22.4728 25.4727C21.9456 25.9999 21.0971 25.9999 19.4 25.9999H12.6C10.9029 25.9999 10.0544 25.9999 9.52721 25.4727C9 24.9455 9 24.0969 9 22.3999V15.8665V13.1999Z" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M9 16.4V14H24.6C25.158 14 25.437 14 25.6659 14.0613C26.287 14.2278 26.7722 14.713 26.9387 15.3341C27 15.563 27 15.842 27 16.4V18.4V22.4C27 24.0971 27 24.9456 26.4728 25.4728C25.9456 26 25.0971 26 23.4 26H12.6C10.9029 26 10.0544 26 9.52721 25.4728C9 24.9456 9 24.0971 9 22.4V18.4V16.4Z" fill="white" stroke="currentColor" strokeWidth="1.8" />
       </svg>
     );
   }
 
   if (name === 'classroom') {
     return (
-      <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="4.8" y="5" width="14.4" height="10.6" rx="1.8" stroke="currentColor" strokeWidth="1.6" />
-        <path d="M8.2 19h7.6M12 15.6V19" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-        <path d="M8 9.2h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <svg className={cls} viewBox="0 0 36 36" fill="none" aria-hidden="true">
+        <rect x="8" y="11" width="20" height="15" rx="4" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M20 18.9004H24C24.6075 18.9004 25.0996 19.3925 25.0996 20V22.0996H18.9004V20C18.9004 19.3925 19.3925 18.9004 20 18.9004Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+        <path d="M9 22H27" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M15 11L18 8L21 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     );
   }
@@ -502,6 +519,15 @@ function App() {
     });
   };
 
+  const appendThinkingBlock = (text) => {
+    const lines = String(text || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    lines.forEach((line) => appendThinkingText(line));
+  };
+
   const upsertThinkingProgress = (stage, text, options = {}) => {
     const safeText = (text || '').trim();
     if (!safeText) return;
@@ -600,10 +626,6 @@ function App() {
         break;
       case 'decide_search':
         setStepNoteIfEmpty('decide_search', '최신성/사실성 기준으로 웹검색 필요 여부를 판단하는 중');
-        upsertThinkingProgress(
-          'decide_search',
-          `요청 "${(currentQuestionRef.current || '현재 질문').slice(0, 34)}"의 검색 필요성을 확인하고 있습니다.`,
-        );
         break;
       case 'plan_queries':
         setStepNoteIfEmpty('plan_queries', '실행 순서를 포함한 Todo 리스트를 구성하는 중');
@@ -901,10 +923,9 @@ function App() {
 
               const firstTopic = parsed.data?.primaryQueries?.[0] || '요청 주제';
               if (parsed.data?.shouldSearch) {
-                const requestPreview = (currentQuestionRef.current || firstTopic).slice(0, 42);
                 upsertThinkingProgress(
                   'decide_search',
-                  `사용자 요청 "${requestPreview}"은 최신 근거 확인이 필요해 검색을 진행합니다.`,
+                  '검색 필요성이 확인되어 웹검색을 진행합니다.',
                   { spinning: false },
                 );
                 setStepNote('decide_search', `"${firstTopic}" 관련 최신/근거 확인을 위해 웹검색이 필요합니다.`);
@@ -915,10 +936,9 @@ function App() {
                     : `Todo 확정: 핵심 쿼리 1개, 최대 ${parsed.data?.primaryResultCount || 5}건 검색합니다.`,
                 );
               } else {
-                const requestPreview = (currentQuestionRef.current || firstTopic).slice(0, 42);
                 upsertThinkingProgress(
                   'decide_search',
-                  `사용자 요청 "${requestPreview}"은 검색 없이 답변 가능합니다.`,
+                  '검색 없이 답변 가능한 요청으로 판단했습니다.',
                   { spinning: false },
                 );
                 setStepNote('decide_search', '현재 질문은 내부 지식만으로 답변 가능한 요청입니다.');
@@ -928,6 +948,11 @@ function App() {
                 setStepSkipped('search_2');
                 queueStatusEvent('search_skipped');
               }
+              continue;
+            }
+
+            if (parsed.type === 'thinking_intro') {
+              appendThinkingBlock(parsed.data);
               continue;
             }
 
@@ -1094,20 +1119,42 @@ function App() {
         <div className="sidebar-inner">
           <div className="brand-row">
             <div className="brand-mark">
-              <span className="brand-glyph" aria-hidden="true"><SidebarIcon name="logo" /></span>
-              <span className="brand-name">issamGPT</span>
+              <img
+                src="https://issamgpt.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Flogo.266e423a.png&w=256&q=75"
+                alt="issamGPT"
+                className="brand-logo-image"
+                loading="eager"
+                decoding="async"
+              />
             </div>
-            <button
-              type="button"
-              className="sidebar-collapse-btn"
-              aria-label={isSidebarCollapsed ? '사이드바 펼치기' : '사이드바 접기'}
-              onClick={() => setIsSidebarCollapsed((prev) => !prev)}
-            >
-              <SidebarIcon name="collapse" />
-            </button>
+            {!isSidebarCollapsed && (
+              <button
+                type="button"
+                className="sidebar-collapse-btn"
+                aria-label="사이드바 접기"
+                title="사이드바 접기"
+                onClick={() => setIsSidebarCollapsed(true)}
+              >
+                <SidebarIcon name="collapse" />
+              </button>
+            )}
           </div>
 
           <nav className="sidebar-nav" aria-label="주요 메뉴">
+            {isSidebarCollapsed && (
+              <button
+                type="button"
+                className="sidebar-nav-item sidebar-home-nav-item"
+                aria-label="사이드바 펼치기"
+                title="사이드바 펼치기"
+                onClick={() => setIsSidebarCollapsed(false)}
+              >
+                <span className="sidebar-nav-icon" aria-hidden="true">
+                  <SidebarIcon name="home" />
+                </span>
+                <span className="sidebar-nav-label">홈</span>
+              </button>
+            )}
             {SIDEBAR_NAV_ITEMS.map((item) => (
               <button
                 key={item.key}

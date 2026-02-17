@@ -784,6 +784,8 @@ async function optimizeSearchQueries({ userQuery, queries, mode = 'primary', max
         'Rules:',
         '- Keep same intent; improve precision and retrieval effectiveness.',
         '- Add key qualifiers only when they help (official docs, install, setup, latest version, etc.).',
+        '- For Korean, rewrite polite request sentences into concise keyword-style search phrases.',
+        '- Prefer core terms and constraints over full natural-language sentences.',
         '- Each query must be <= 90 chars.',
         '- Queries must be keyword-style; avoid polite request endings.',
         '- Do not return exactly the same sentence as user query.',
@@ -808,6 +810,92 @@ async function optimizeSearchQueries({ userQuery, queries, mode = 'primary', max
   } catch (err) {
     console.error('Search query optimizer error:', err.message);
     return qualityFallback;
+  }
+}
+
+function buildInitialTodoFallback(userQuery, searchPlan = {}) {
+  const topic = (
+    keywordizeQueryText(userQuery) ||
+    toStringSafe(userQuery).replace(/\s+/g, ' ').trim() ||
+    '현재 질문'
+  )
+    .slice(0, 56)
+    .trim();
+
+  if (searchPlan?.shouldSearch) {
+    return [
+      `선생님께서 ${topic} 관련 답변을 요청하고 있습니다.`,
+      '답변을 위해 아래 순서로 진행하겠습니다.',
+      '- 수업 전개 계획 작성',
+      '- 각 파트별 최신 정보 검색',
+      '- 자료를 바탕으로 수업 내용 작성',
+      '우선 웹검색으로 최신 정보를 확인하겠습니다.',
+    ].join('\n');
+  }
+
+  return [
+    `선생님께서 ${topic} 관련 답변을 요청하고 있습니다.`,
+    '답변을 위해 아래 순서로 진행하겠습니다.',
+    '- 요청 의도와 수업 목적 정리',
+    '- 핵심 개념별 전개 흐름 설계',
+    '- 바로 활용 가능한 수업안 작성',
+    '검색 없이 보유 지식을 바탕으로 답변을 준비하겠습니다.',
+  ].join('\n');
+}
+
+async function generateInitialTodoIntro({ userQuery, searchPlan }) {
+  const fallback = buildInitialTodoFallback(userQuery, searchPlan);
+  if (!GLM4_API_KEY) return fallback;
+
+  const messages = [
+    {
+      role: 'system',
+      content: [
+        'You write the first Thinking-panel message in Korean for teachers.',
+        'Output exactly 5~6 lines, plain text only.',
+        'Line 1: paraphrase the user request naturally (do not copy verbatim).',
+        'Line 2: short lead-in sentence for execution plan.',
+        'Line 3~5: TODO bullets, each starts with "- ".',
+        'Last line: immediate next action.',
+        'No markdown headings, no code block, no quotation marks.',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: [
+        `user_query: ${toStringSafe(userQuery).slice(0, 280)}`,
+        `should_search: ${Boolean(searchPlan?.shouldSearch)}`,
+        `search_mode: ${toStringSafe(searchPlan?.mode) || 'none'}`,
+        `optimized_queries: ${(searchPlan?.primaryQueries || []).join(' | ').slice(0, 220)}`,
+        '',
+        'If should_search=true, the last line must mention starting web search first.',
+        'If should_search=false, the last line must mention proceeding without search.',
+      ].join('\n'),
+    },
+  ];
+
+  try {
+    const raw = await callGlmText(messages, {
+      model: ORCHESTRATOR_MODEL,
+      maxTokens: 220,
+      timeoutMs: 8000,
+      temperature: 0.25,
+      disableThinking: true,
+    });
+    const normalized = toStringSafe(raw)
+      .replace(/```[\s\S]*?```/g, '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 7)
+      .join('\n');
+
+    if (!normalized) return fallback;
+    if (!/^-\s/m.test(normalized)) return fallback;
+    return normalized;
+  } catch (err) {
+    console.error('Initial todo intro generation error:', err.message);
+    return fallback;
   }
 }
 
@@ -1064,6 +1152,15 @@ app.post('/api/chat', async (req, res) => {
         searchPlan = { ...searchPlan, primaryQueries: optimizedPrimaryQueries };
       }
     }
+
+    const initialTodoIntro = await generateInitialTodoIntro({
+      userQuery: lastMessage.content,
+      searchPlan,
+    });
+    if (initialTodoIntro) {
+      sendSSE(res, 'thinking_intro', initialTodoIntro);
+    }
+
     sendSSE(res, 'search_plan', searchPlan);
     await emit({
       stage: 'decide_search',
