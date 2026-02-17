@@ -7,9 +7,17 @@ import { getFaviconUrl } from './utils/favicon';
 import './App.css';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-const TYPING_SPEED = 16;
-const CHARS_PER_TICK = 1;
-const MIN_BUFFER_BEFORE_TYPING = 24;
+
+function readTypingEnvInt(name, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const raw = import.meta.env?.[name];
+  const parsed = Number.parseInt(String(raw ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+const TYPING_SPEED = readTypingEnvInt('VITE_TYPING_INTERVAL_MS', 10, { min: 4, max: 80 });
+const CHARS_PER_TICK = readTypingEnvInt('VITE_TYPING_CHARS_PER_TICK', 2, { min: 1, max: 12 });
+const MIN_BUFFER_BEFORE_TYPING = readTypingEnvInt('VITE_TYPING_MIN_BUFFER', 8, { min: 0, max: 120 });
 const COMPOSER_CLEARANCE_PX = 8;
 const FOLLOWUP_SPACER_DESKTOP = { min: 220, max: 460, ratio: 0.4 };
 const FOLLOWUP_SPACER_MOBILE = { min: 140, max: 240, ratio: 0.28 };
