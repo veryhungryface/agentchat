@@ -13,6 +13,7 @@ const MIN_BUFFER_BEFORE_TYPING = 24;
 const COMPOSER_CLEARANCE_PX = 8;
 const FOLLOWUP_SPACER_DESKTOP = { min: 220, max: 460, ratio: 0.4 };
 const FOLLOWUP_SPACER_MOBILE = { min: 140, max: 240, ratio: 0.28 };
+const MAX_THINKING_ACTIVITY_ITEMS = 64;
 
 const STATUS_STEP_DELAY_MS = {
   analyze_intent: 450,
@@ -65,9 +66,7 @@ const SIDEBAR_NAV_ITEMS = [
 ];
 
 const DEFAULT_HISTORY = [
-  '윤석열 탄핵 사건 정리',
-  '중소기업 매출정보 확인 방법',
-  '교육 데이터 관리 플랫폼 시장 분석',
+
 ];
 
 const MODEL_GROUPS = [
@@ -677,7 +676,10 @@ function App() {
       }
 
       activityIdRef.current += 1;
-      pipeline.activity = [...prev, { id: activityIdRef.current, type: 'text', text: safeText }].slice(-8);
+      pipeline.activity = [
+        ...prev,
+        { id: activityIdRef.current, type: 'text', text: safeText },
+      ].slice(-MAX_THINKING_ACTIVITY_ITEMS);
       return pipeline;
     });
   };
@@ -701,7 +703,7 @@ function App() {
       const existingIndex = prev.findIndex((item) => item.type === 'progress' && item.stage === stage);
       if (existingIndex >= 0) {
         prev[existingIndex] = { ...prev[existingIndex], text: safeText, spinning };
-        pipeline.activity = prev.slice(-8);
+        pipeline.activity = prev.slice(-MAX_THINKING_ACTIVITY_ITEMS);
         return pipeline;
       }
 
@@ -709,7 +711,7 @@ function App() {
       pipeline.activity = [
         ...prev,
         { id: activityIdRef.current, type: 'progress', stage, text: safeText, spinning },
-      ].slice(-8);
+      ].slice(-MAX_THINKING_ACTIVITY_ITEMS);
       return pipeline;
     });
   };
@@ -741,7 +743,7 @@ function App() {
         });
       }
 
-      pipeline.activity = next.slice(-12);
+      pipeline.activity = next.slice(-MAX_THINKING_ACTIVITY_ITEMS);
       return pipeline;
     });
   };
@@ -924,14 +926,6 @@ function App() {
       return assistant;
     });
 
-    const stageKey = round === 2 ? 'searching_2' : 'searching';
-    const queryText = payload.query?.trim() || '\uac80\uc0c9 \ucffc\ub9ac';
-    upsertThinkingProgress(
-      stageKey,
-      `\uc6f9\uac80\uc0c9 \uc2e4\ud589 \uacb0\uacfc: "${queryText}" \uae30\uc900 \uc774\ubc88 \ucffc\ub9ac \ucd9c\ucc98 ${sources.length}\uac1c\ub97c \ud655\ubcf4\ud588\uc2b5\ub2c8\ub2e4.`,
-      { spinning: false },
-    );
-
     if (sources.length > 0) {
       upsertThinkingSources({
         groupId: stepId,
@@ -1108,11 +1102,6 @@ function App() {
 
               const firstTopic = parsed.data?.primaryQueries?.[0] || '요청 주제';
               if (parsed.data?.shouldSearch) {
-                upsertThinkingProgress(
-                  'decide_search',
-                  '검색 필요성이 확인되어 웹검색을 진행합니다.',
-                  { spinning: false },
-                );
                 setStepNote('decide_search', `"${firstTopic}" 관련 최신/근거 확인을 위해 웹검색이 필요합니다.`);
                 setStepNote(
                   'plan_queries',
@@ -1121,11 +1110,6 @@ function App() {
                     : `Todo 확정: 핵심 쿼리 1개, 최대 ${parsed.data?.primaryResultCount || 5}건 검색합니다.`,
                 );
               } else {
-                upsertThinkingProgress(
-                  'decide_search',
-                  '검색 없이 답변 가능한 요청으로 판단했습니다.',
-                  { spinning: false },
-                );
                 setStepNote('decide_search', '현재 질문은 내부 지식만으로 답변 가능한 요청입니다.');
                 setStepSkipped('plan_queries', 'Todo 확정: 검색 단계 없이 답변 작성 단계로 이동합니다.');
                 setStepSkipped('search_1');

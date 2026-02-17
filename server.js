@@ -11,28 +11,39 @@ app.use(cors());
 app.use(express.json());
 
 const {
-  GLM4_API_KEY,
-  GLM4_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4',
-  GLM4_MODEL = 'glm-5',
-  ORCHESTRATOR_MODEL = process.env.ORCHESTRATOR_MODEL || process.env.GLM_ORCHESTRATOR_MODEL || 'gemini-2.5-flash-lite',
-  RESPONSE_MODEL = process.env.GLM_RESPONSE_MODEL || GLM4_MODEL,
-  FOLLOWUP_MODEL = process.env.GLM_FOLLOWUP_MODEL || 'glm-4.7-flash',
+  GLM_API_KEY = '',
+  GLM_BASE_URL = '',
+  GLM_MODEL = '',
+  GLM4_API_KEY = '',
+  GLM4_BASE_URL = '',
+  GLM4_MODEL = '',
+  ORCHESTRATOR_MODEL: ORCHESTRATOR_MODEL_ENV = '',
+  GLM_ORCHESTRATOR_MODEL = '',
+  RESPONSE_MODEL: RESPONSE_MODEL_ENV = '',
+  GLM_RESPONSE_MODEL: LEGACY_GLM_RESPONSE_MODEL = '',
+  FOLLOWUP_MODEL: FOLLOWUP_MODEL_ENV = '',
+  GLM_FOLLOWUP_MODEL: LEGACY_GLM_FOLLOWUP_MODEL = '',
   OPENAI_API_KEY = '',
   OPENAI_BASE_URL = 'https://api.openai.com/v1',
   OPENAI_MODEL = 'gpt-5-mini',
   GEMINI_API_KEY = '',
   GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta',
   GEMINI_MODEL = 'gemini-2.5-flash',
-  GLM_API_KEY = '',
-  GLM_BASE_URL = '',
-  GLM_MODEL = '',
   TAVILY_API_KEY,
   PORT = 3001,
 } = process.env;
 
-const GLM_RESPONSE_API_KEY = GLM_API_KEY || GLM4_API_KEY || '';
-const GLM_RESPONSE_BASE_URL = GLM_BASE_URL || GLM4_BASE_URL;
-const GLM_RESPONSE_MODEL = GLM_MODEL || GLM4_MODEL;
+const RESOLVED_GLM_API_KEY = GLM_API_KEY || GLM4_API_KEY || '';
+const RESOLVED_GLM_BASE_URL = GLM_BASE_URL || GLM4_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
+const RESOLVED_GLM_MODEL = GLM_MODEL || GLM4_MODEL || 'glm-5';
+
+const ORCHESTRATOR_MODEL = ORCHESTRATOR_MODEL_ENV || GLM_ORCHESTRATOR_MODEL || 'gemini-2.5-flash-lite';
+const RESPONSE_MODEL = RESPONSE_MODEL_ENV || LEGACY_GLM_RESPONSE_MODEL || RESOLVED_GLM_MODEL;
+const FOLLOWUP_MODEL = FOLLOWUP_MODEL_ENV || LEGACY_GLM_FOLLOWUP_MODEL || 'glm-4.7-flash';
+
+const GLM_RESPONSE_API_KEY = RESOLVED_GLM_API_KEY;
+const GLM_RESPONSE_BASE_URL = RESOLVED_GLM_BASE_URL;
+const GLM_RESPONSE_MODEL = RESOLVED_GLM_MODEL;
 
 const SEARCH_PLAN_FALLBACK = {
   shouldSearch: false,
@@ -50,23 +61,9 @@ const SECOND_SEARCH_FALLBACK = {
 };
 
 const SEARCH_RESULT_LIMITS = {
-  primary: { min: 3, max: 12, defaultSingle: 5, defaultMulti: 4 },
-  followup: { min: 5, max: 15, default: 10 },
+  primary: { min: 3, max: 20, defaultSingle: 6, defaultMulti: 6 },
+  followup: { min: 5, max: 25, default: 12 },
 };
-
-const NO_SEARCH_HINTS = [
-  /translate|translation|proofread|rewrite|summarize|summarise|paraphrase/i,
-  /번역|요약|교정|맞춤법|문장 다듬/i,
-  /write a poem|story|creative writing|brainstorm names/i,
-  /시를 써|소설 써|창작|아이디어만/i,
-];
-
-const SEARCH_HINTS = [
-  /latest|today|current|news|price|stock|release|version|update|official docs?/i,
-  /recommend|comparison|compare|vs|best|top \d+/i,
-  /최신|오늘|현재|뉴스|가격|주가|환율|업데이트|버전|공식 문서|추천|비교|리뷰/i,
-  /설치|세팅|가이드|준비물|requirements|prerequisite/i,
-];
 
 function sendSSE(res, type, data) {
   res.write(`data: ${JSON.stringify({ type, data })}\n\n`);
@@ -277,49 +274,6 @@ function normalizeSecondSearchDecision(decision) {
   };
 }
 
-function buildHeuristicSearchPlan(userQuery) {
-  const query = toStringSafe(userQuery).trim();
-  if (!query) {
-    return {
-      shouldSearch: false,
-      mode: 'none',
-      primaryQueries: [],
-      reason: 'Empty query.',
-    };
-  }
-
-  const isNoSearchCandidate = NO_SEARCH_HINTS.some((pattern) => pattern.test(query));
-  const isSearchCandidate = SEARCH_HINTS.some((pattern) => pattern.test(query));
-
-  let shouldSearch = true;
-  if (isNoSearchCandidate && !isSearchCandidate) {
-    shouldSearch = false;
-  }
-
-  if (!shouldSearch) {
-    return {
-      shouldSearch: false,
-      mode: 'none',
-      primaryQueries: [],
-      reason: 'Heuristic: pure writing/editing request.',
-    };
-  }
-
-  const multiHint = /\b(vs|versus|compare|comparison)\b|비교|차이|장단점|및|그리고/i.test(query);
-  const seedQuery = hardenSearchQuery(query, query, 'primary') || keywordizeQueryText(query) || query;
-  return {
-    shouldSearch: true,
-    mode: multiHint ? 'multi' : 'single',
-    primaryQueries: [seedQuery],
-    primaryResultCount: multiHint
-      ? SEARCH_RESULT_LIMITS.primary.defaultMulti
-      : SEARCH_RESULT_LIMITS.primary.defaultSingle,
-    reason: multiHint
-      ? 'Heuristic: likely multi-topic factual request.'
-      : 'Heuristic: factual/procedural request; search recommended.',
-  };
-}
-
 function normalizeQueryArray(rawQueries, maxQueries = 3) {
   return [...new Set((rawQueries || []).map((q) => toStringSafe(q).trim()).filter(Boolean))].slice(
     0,
@@ -518,6 +472,16 @@ function normalizeFollowUpQuestions(rawQuestions, userQuery) {
   return out.slice(0, 3);
 }
 
+function requiresFreshNewsSearch(userQuery) {
+  const query = toStringSafe(userQuery).trim();
+  if (!query) return false;
+
+  const freshnessHint = /(최신|최근|오늘|실시간|현직|현재|latest|recent|today|current|real[-\s]?time)/i;
+  const sourceHint = /(뉴스|기사|보도|신문|속보|언론|발표|news|article|report|press)/i;
+
+  return freshnessHint.test(query) || sourceHint.test(query);
+}
+
 function areFollowUpsTemplateLike(questions, userQuery) {
   if (!Array.isArray(questions) || questions.length < 3) return true;
 
@@ -635,14 +599,14 @@ async function callGlmText(
       return toStringSafe(message.reasoning_content).trim();
     }
 
-    const res = await fetch(`${GLM4_BASE_URL}/chat/completions`, {
+    const res = await fetch(`${RESOLVED_GLM_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${GLM4_API_KEY}`,
+        Authorization: `Bearer ${RESOLVED_GLM_API_KEY}`,
       },
       body: JSON.stringify({
-        model: resolvedModel || GLM4_MODEL,
+        model: resolvedModel || RESOLVED_GLM_MODEL,
         messages,
         stream: false,
         max_tokens: maxTokens,
@@ -684,7 +648,7 @@ function hasModelProviderKey(modelName) {
   const provider = detectModelProvider(modelName);
   if (provider === 'gemini') return Boolean(toStringSafe(GEMINI_API_KEY).trim());
   if (provider === 'openai') return Boolean(toStringSafe(OPENAI_API_KEY).trim());
-  return Boolean(toStringSafe(GLM4_API_KEY).trim());
+  return Boolean(toStringSafe(RESOLVED_GLM_API_KEY).trim());
 }
 
 function resolveRequestedResponseModel(requestedModel) {
@@ -894,7 +858,7 @@ function buildThinkingFallback(stage, context = {}) {
 
 async function generateThinkingNarration({ stage, userQuery, context = {} }) {
   const fallback = buildThinkingFallback(stage, context);
-  if (!GLM4_API_KEY) return fallback;
+  if (!hasModelProviderKey(ORCHESTRATOR_MODEL)) return fallback;
 
   const lines = [
     `stage: ${stage}`,
@@ -1041,10 +1005,25 @@ async function searchWeb(query, maxResults = SEARCH_RESULT_LIMITS.followup.defau
 }
 
 async function buildInitialSearchPlan(userQuery, conversationMessages) {
-  const heuristicPlan = normalizeSearchPlan(buildHeuristicSearchPlan(userQuery), userQuery);
+  const modelFallbackPlan = normalizeSearchPlan(SEARCH_PLAN_FALLBACK, userQuery);
+  const shouldForceSearch = requiresFreshNewsSearch(userQuery);
+  const forcedQuery =
+    hardenSearchQuery(userQuery, userQuery, 'primary') ||
+    keywordizeQueryText(userQuery) ||
+    toStringSafe(userQuery).trim();
+  const forcedSearchPlan = normalizeSearchPlan(
+    {
+      shouldSearch: true,
+      mode: 'single',
+      primaryQueries: forcedQuery ? [forcedQuery] : [],
+      primaryResultCount: SEARCH_RESULT_LIMITS.primary.defaultSingle,
+      reason: 'Policy override: freshness/news style request requires search.',
+    },
+    userQuery,
+  );
 
   if (!hasModelProviderKey(ORCHESTRATOR_MODEL)) {
-    return heuristicPlan;
+    return shouldForceSearch ? forcedSearchPlan : modelFallbackPlan;
   }
 
   const briefHistory = (conversationMessages || [])
@@ -1075,7 +1054,8 @@ async function buildInitialSearchPlan(userQuery, conversationMessages) {
         '- mode=multi for clearly distinct subtopics requiring separate lookups.',
         '- primaryQueries should be 0 items if mode=none, 1 item for single, up to 3 items for multi.',
         '- primaryResultCount is per-query max_results for first-round retrieval.',
-        '- preferred range for primaryResultCount: 3~8 for single, 3~6 for multi.',
+        '- primaryResultCount must be chosen by difficulty/uncertainty, not fixed.',
+        '- Simple lookup usually 4~8, broader or fast-changing topics can be 10~20.',
         '',
         'Return JSON schema exactly:',
         '{"shouldSearch": boolean, "mode": "none"|"single"|"multi", "primaryQueries": string[], "primaryResultCount": number, "reason": string}',
@@ -1091,18 +1071,13 @@ async function buildInitialSearchPlan(userQuery, conversationMessages) {
       disableThinking: true,
     });
     const normalized = normalizeSearchPlan(plan, userQuery);
-
-    if (!normalized.primaryQueries.length && heuristicPlan.primaryQueries.length) {
-      return {
-        ...normalized,
-        primaryQueries: heuristicPlan.primaryQueries,
-      };
+    if (shouldForceSearch && !normalized.shouldSearch) {
+      return forcedSearchPlan;
     }
-
     return normalized;
   } catch (err) {
     console.error('Search planner error:', err.message);
-    return heuristicPlan;
+    return shouldForceSearch ? forcedSearchPlan : modelFallbackPlan;
   }
 }
 
@@ -1176,39 +1151,8 @@ async function optimizeSearchQueries({ userQuery, queries, mode = 'primary', max
   }
 }
 
-function buildInitialTodoFallback(userQuery, searchPlan = {}) {
-  const topic = (
-    keywordizeQueryText(userQuery) ||
-    toStringSafe(userQuery).replace(/\s+/g, ' ').trim() ||
-    '현재 질문'
-  )
-    .slice(0, 56)
-    .trim();
-
-  if (searchPlan?.shouldSearch) {
-    return [
-      `선생님께서 ${topic} 관련 답변을 요청하고 있습니다.`,
-      '답변을 위해 아래 순서로 진행하겠습니다.',
-      '- 수업 전개 계획 작성',
-      '- 각 파트별 최신 정보 검색',
-      '- 자료를 바탕으로 수업 내용 작성',
-      '우선 웹검색으로 최신 정보를 확인하겠습니다.',
-    ].join('\n');
-  }
-
-  return [
-    `선생님께서 ${topic} 관련 답변을 요청하고 있습니다.`,
-    '답변을 위해 아래 순서로 진행하겠습니다.',
-    '- 요청 의도와 수업 목적 정리',
-    '- 핵심 개념별 전개 흐름 설계',
-    '- 바로 활용 가능한 수업안 작성',
-    '검색 없이 보유 지식을 바탕으로 답변을 준비하겠습니다.',
-  ].join('\n');
-}
-
 async function generateInitialTodoIntro({ userQuery, searchPlan }) {
-  const fallback = buildInitialTodoFallback(userQuery, searchPlan);
-  if (!GLM4_API_KEY) return fallback;
+  if (!hasModelProviderKey(ORCHESTRATOR_MODEL)) return '';
 
   const messages = [
     {
@@ -1253,18 +1197,17 @@ async function generateInitialTodoIntro({ userQuery, searchPlan }) {
       .slice(0, 7)
       .join('\n');
 
-    if (!normalized) return fallback;
-    if (!/^-\s/m.test(normalized)) return fallback;
+    if (!normalized) return '';
     return normalized;
   } catch (err) {
     console.error('Initial todo intro generation error:', err.message);
-    return fallback;
+    return '';
   }
 }
 
 async function generateFollowUpQuestions({ userQuery, answerText }) {
   const fallback = buildFollowUpFallback(userQuery);
-  if (!GLM4_API_KEY) return fallback;
+  if (!hasModelProviderKey(FOLLOWUP_MODEL)) return fallback;
 
   const trimmedAnswer = toStringSafe(answerText).replace(/\s+/g, ' ').trim().slice(0, 900);
   const messages = [
@@ -1397,7 +1340,7 @@ async function shouldDoSecondSearch(userQuery, searchPlan, firstRoundEntries) {
         '{"needsMore": boolean, "refinedQueries": string[], "additionalResultCount": number, "reason": string}',
         'If needsMore=false, refinedQueries must be empty.',
         'If needsMore=true, provide 1-2 concise refined queries.',
-        'If needsMore=true, additionalResultCount should usually be 8~12.',
+        'If needsMore=true, additionalResultCount should adapt to remaining gaps (usually 8~20, can be higher when needed).',
       ].join('\n'),
     },
   ];

@@ -673,52 +673,91 @@
 }
 
 .md-codeblock {
-  margin: 8px 0 10px;
-  border-radius: 4px;
-  overflow: hidden;
-  background: oklch(0.278 0.033 256.848);
+  margin: 10px 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .md-codeblock-toolbar {
-  height: 32px;
-  padding: 0 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  min-height: 52px;
+  padding: 0 16px;
+  border-radius: 12px 12px 0 0;
+  border: 1px solid #f0f1f3;
+  border-bottom: none;
+  background: #eceff3;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: #e8edf8;
+  color: #283648;
 }
 
 .md-codeblock-lang {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.2px;
 }
 
 .md-codeblock-copy {
-  border: none;
-  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
-  color: #d7deee;
-  height: 22px;
-  font-size: 11px;
-  padding: 0 8px;
+  color: #2f3d50;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.md-codeblock-copy svg {
+  display: block;
+  width: 20px;
+  height: 20px;
 }
 
 .md-codeblock-copy:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: #e1e5eb;
+  border-color: #d7dce4;
 }
 
-.md-codeblock pre {
-  margin: 0;
-  padding: 9px 14px;
+.md-codeblock-copy:active {
+  transform: translateY(0.5px);
 }
 
-.md-codeblock pre code {
-  color: oklch(0.928 0.006 264.531);
-  font-size: 13.7px;
-  line-height: 19.6px;
+.md-codeblock-copy:focus-visible {
+  outline: 2px solid #f54f00;
+  outline-offset: 2px;
+}
+
+.md-codeblock-body {
+  border: 1px solid #f0f1f3;
+  border-top: 1px solid #ffffff;
+  border-radius: 0 0 12px 12px;
+  background: #eceff3;
+  overflow: auto;
+}
+
+.md-codeblock-body pre {
+  margin: 0 !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+}
+
+.md-codeblock-body .prism-code,
+.md-codeblock-body pre code,
+.md-codeblock-body [class*='language-'],
+.md-codeblock-body code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  letter-spacing: 0;
+  background: transparent !important;
+  background-color: transparent !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
 }
 
 .cursor-blink {

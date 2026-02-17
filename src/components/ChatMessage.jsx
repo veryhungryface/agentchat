@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash';
 import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript';
 import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript';
@@ -83,22 +83,34 @@ function MarkdownCode({ inline, className, children, ...props }) {
           className="md-codeblock-copy"
           onClick={handleCopy}
           aria-label="코드 복사"
-          title={copied ? 'Copied' : 'Copy'}
+          title={copied ? '복사됨' : '복사'}
         >
-          {copied ? 'Copied' : 'Copy'}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <rect x="4" y="8" width="11" height="11" rx="3" stroke="currentColor" strokeWidth="1.6" />
+            <path d="M15.3462 15H17C18.6569 15 20 13.6569 20 12V7C20 5.34315 18.6569 4 17 4H12C10.3431 4 9 5.34315 9 7V7.53571" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
         </button>
       </div>
-
-      <SyntaxHighlighter
-        language={lang || 'text'}
-        style={oneDark}
-        customStyle={{ margin: 0, background: 'transparent', padding: '8px 12px' }}
-        codeTagProps={{ style: { fontSize: '0.79rem', lineHeight: 1.45 } }}
-        PreTag="div"
-        wrapLongLines
-      >
-        {codeText}
-      </SyntaxHighlighter>
+      <div className="md-codeblock-body">
+        <SyntaxHighlighter
+          language={lang || 'text'}
+          style={oneLight}
+          customStyle={{ margin: 0, background: 'transparent', padding: '14px 16px', borderRadius: 0 }}
+          codeTagProps={{
+            style: {
+              fontSize: '0.94rem',
+              lineHeight: 1.58,
+              background: 'transparent',
+              borderRadius: 0,
+              padding: 0,
+              display: 'block',
+            },
+          }}
+          wrapLongLines
+        >
+          {codeText}
+        </SyntaxHighlighter>
+      </div>
     </div>
   );
 }
