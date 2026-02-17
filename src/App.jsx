@@ -11,6 +11,8 @@ const TYPING_SPEED = 16;
 const CHARS_PER_TICK = 1;
 const MIN_BUFFER_BEFORE_TYPING = 24;
 const COMPOSER_CLEARANCE_PX = 8;
+const FOLLOWUP_SPACER_DESKTOP = { min: 220, max: 460, ratio: 0.4 };
+const FOLLOWUP_SPACER_MOBILE = { min: 140, max: 240, ratio: 0.28 };
 
 const STATUS_STEP_DELAY_MS = {
   analyze_intent: 450,
@@ -435,7 +437,7 @@ function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(true);
   const [composerReservePx, setComposerReservePx] = useState(212);
-  const [followUpTopAlignPending, setFollowUpTopAlignPending] = useState(false);
+  const [followUpSpacerPx, setFollowUpSpacerPx] = useState(0);
   const activityIdRef = useRef(0);
   const currentQuestionRef = useRef('');
 
@@ -493,6 +495,24 @@ function App() {
     if (!container) return;
     const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     shouldStickToBottomRef.current = distanceToBottom < 88;
+  };
+
+  const computeFollowUpSpacerPx = () => {
+    const containerHeight =
+      chatContainerRef.current?.clientHeight ||
+      (typeof window !== 'undefined' ? window.innerHeight : 0);
+    const isMobile =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(max-width: 700px)').matches;
+    const cfg = isMobile ? FOLLOWUP_SPACER_MOBILE : FOLLOWUP_SPACER_DESKTOP;
+    const raw = Math.round(containerHeight * cfg.ratio);
+    return Math.max(cfg.min, Math.min(cfg.max, raw || cfg.min));
+  };
+
+  const shrinkFollowUpSpacer = (charCount = 1) => {
+    const delta = Math.max(1, Math.round(charCount * 2));
+    setFollowUpSpacerPx((prev) => (prev > 0 ? Math.max(0, prev - delta) : 0));
   };
 
   const scrollMessageToTop = (messageIndex) => {
@@ -781,6 +801,7 @@ function App() {
       const chunk = typeBufferRef.current.slice(0, CHARS_PER_TICK);
       typeBufferRef.current = typeBufferRef.current.slice(CHARS_PER_TICK);
       displayedRef.current += chunk;
+      shrinkFollowUpSpacer(chunk.length);
 
       const rendered = displayedRef.current;
       updateLatestAssistant((assistant) => ({ ...assistant, content: rendered }));
@@ -928,7 +949,7 @@ function App() {
 
     if (clearComposer) setInput('');
     setIsLoading(true);
-    setFollowUpTopAlignPending(Boolean(shouldAlignUserMessageTop && appendUser));
+    setFollowUpSpacerPx(shouldAlignUserMessageTop && appendUser ? computeFollowUpSpacerPx() : 0);
     shouldStickToBottomRef.current = !shouldAlignUserMessageTop;
 
     typeBufferRef.current = '';
@@ -1131,7 +1152,7 @@ function App() {
       await statusSequenceRef.current;
       completePipeline();
       finalizeLatestAssistant();
-      setFollowUpTopAlignPending(false);
+      setFollowUpSpacerPx(0);
       setIsLoading(false);
       inputRef.current?.focus();
     }
@@ -1404,7 +1425,13 @@ function App() {
                     )}
                 </div>
               ))}
-              {followUpTopAlignPending && <div className="followup-top-align-spacer" aria-hidden="true" />}
+              {followUpSpacerPx > 0 && (
+                <div
+                  className="followup-top-align-spacer"
+                  style={{ height: `${followUpSpacerPx}px` }}
+                  aria-hidden="true"
+                />
+              )}
             </div>
           )}
         </main>
