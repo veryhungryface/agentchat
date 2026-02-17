@@ -14,7 +14,7 @@ const {
   GLM4_API_KEY,
   GLM4_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4',
   GLM4_MODEL = 'glm-5',
-  ORCHESTRATOR_MODEL = process.env.GLM_ORCHESTRATOR_MODEL || 'glm-4.7-flash',
+  ORCHESTRATOR_MODEL = process.env.ORCHESTRATOR_MODEL || process.env.GLM_ORCHESTRATOR_MODEL || 'gemini-2.5-flash-lite',
   RESPONSE_MODEL = process.env.GLM_RESPONSE_MODEL || GLM4_MODEL,
   FOLLOWUP_MODEL = process.env.GLM_FOLLOWUP_MODEL || 'glm-4.7-flash',
   OPENAI_API_KEY = '',
@@ -553,38 +553,14 @@ async function callGlmJson(
     disableThinking = false,
   } = {},
 ) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await fetch(`${GLM4_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${GLM4_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        stream: false,
-        max_tokens: maxTokens,
-        temperature,
-        ...(disableThinking ? { thinking: { type: 'disabled' } } : {}),
-      }),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`GLM4 API error: ${res.status} - ${body}`);
-    }
-
-    const payload = await res.json();
-    const content = payload.choices?.[0]?.message?.content;
-    return extractFirstJsonObject(content);
-  } finally {
-    clearTimeout(timeout);
-  }
+  const raw = await callGlmText(messages, {
+    model,
+    timeoutMs,
+    maxTokens,
+    temperature,
+    disableThinking,
+  });
+  return extractFirstJsonObject(raw);
 }
 
 async function callGlmText(
@@ -597,10 +573,68 @@ async function callGlmText(
     disableThinking = false,
   } = {},
 ) {
+  const resolvedModel = toStringSafe(model).trim() || ORCHESTRATOR_MODEL;
+  const provider = detectModelProvider(resolvedModel);
+
+  if (provider === 'gemini') {
+    const generationConfig = {};
+    if (Number.isFinite(maxTokens) && maxTokens > 0) {
+      generationConfig.maxOutputTokens = maxTokens;
+    }
+    if (typeof temperature === 'number') {
+      generationConfig.temperature = temperature;
+    }
+    return chatWithGeminiText({
+      baseUrl: GEMINI_BASE_URL,
+      apiKey: GEMINI_API_KEY,
+      model: resolvedModel || GEMINI_MODEL,
+      messages,
+      generationConfig: Object.keys(generationConfig).length ? generationConfig : undefined,
+    });
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    if (provider === 'openai') {
+      const res = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: resolvedModel || OPENAI_MODEL,
+          messages,
+          stream: false,
+          max_tokens: maxTokens,
+          temperature,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`OpenAI API error: ${res.status} - ${body}`);
+      }
+
+      const payload = await res.json();
+      const message = payload.choices?.[0]?.message || {};
+      const content = message.content;
+      if (typeof content === 'string' && content.trim()) {
+        return content.trim();
+      }
+      if (Array.isArray(content)) {
+        const joined = content
+          .map((part) => toStringSafe(part?.text || part))
+          .join('')
+          .trim();
+        if (joined) return joined;
+      }
+      return toStringSafe(message.reasoning_content).trim();
+    }
+
     const res = await fetch(`${GLM4_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -608,7 +642,7 @@ async function callGlmText(
         Authorization: `Bearer ${GLM4_API_KEY}`,
       },
       body: JSON.stringify({
-        model,
+        model: resolvedModel || GLM4_MODEL,
         messages,
         stream: false,
         max_tokens: maxTokens,
@@ -644,6 +678,13 @@ function detectModelProvider(modelName) {
   if (model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3')) return 'openai';
   if (model.startsWith('glm-')) return 'glm';
   return 'glm';
+}
+
+function hasModelProviderKey(modelName) {
+  const provider = detectModelProvider(modelName);
+  if (provider === 'gemini') return Boolean(toStringSafe(GEMINI_API_KEY).trim());
+  if (provider === 'openai') return Boolean(toStringSafe(OPENAI_API_KEY).trim());
+  return Boolean(toStringSafe(GLM4_API_KEY).trim());
 }
 
 function resolveRequestedResponseModel(requestedModel) {
@@ -707,12 +748,15 @@ async function chatWithOpenAICompatStream({ baseUrl, apiKey, model, messages }) 
   return response;
 }
 
-async function chatWithGeminiText({ baseUrl, apiKey, model, messages }) {
+async function chatWithGeminiText({ baseUrl, apiKey, model, messages, generationConfig }) {
   if (!toStringSafe(apiKey).trim()) {
     throw new Error(`Gemini API key is missing for model: ${model}`);
   }
 
   const payload = mapMessagesToGeminiPayload(messages);
+  if (generationConfig && typeof generationConfig === 'object') {
+    payload.generationConfig = generationConfig;
+  }
   const endpoint = `${normalizeBaseUrl(baseUrl)}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -999,7 +1043,7 @@ async function searchWeb(query, maxResults = SEARCH_RESULT_LIMITS.followup.defau
 async function buildInitialSearchPlan(userQuery, conversationMessages) {
   const heuristicPlan = normalizeSearchPlan(buildHeuristicSearchPlan(userQuery), userQuery);
 
-  if (!GLM4_API_KEY) {
+  if (!hasModelProviderKey(ORCHESTRATOR_MODEL)) {
     return heuristicPlan;
   }
 
@@ -1065,7 +1109,7 @@ async function buildInitialSearchPlan(userQuery, conversationMessages) {
 async function optimizeSearchQueries({ userQuery, queries, mode = 'primary', maxQueries = 3 }) {
   const fallback = normalizeQueryArray(queries, maxQueries);
   const qualityFallback = enforceOptimizedQueryQuality(fallback, userQuery, mode, maxQueries);
-  if (!fallback.length || !GLM4_API_KEY) return qualityFallback;
+  if (!fallback.length || !hasModelProviderKey(ORCHESTRATOR_MODEL)) return qualityFallback;
 
   const messages = [
     {
@@ -1316,7 +1360,7 @@ async function generateFollowUpQuestions({ userQuery, answerText }) {
 }
 
 async function shouldDoSecondSearch(userQuery, searchPlan, firstRoundEntries) {
-  if (!GLM4_API_KEY || !firstRoundEntries.length) {
+  if (!hasModelProviderKey(ORCHESTRATOR_MODEL) || !firstRoundEntries.length) {
     return SECOND_SEARCH_FALLBACK;
   }
 

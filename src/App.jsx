@@ -75,10 +75,7 @@ const MODEL_GROUPS = [
     id: 'gemini',
     label: 'Gemini',
     models: [
-      'gemini-3-pro-preview',
       'gemini-3-flash-preview',
-      'gemini-3-deep-think',
-      'gemini-2.5-pro',
       'gemini-2.5-flash',
       'gemini-2.5-flash-lite',
       'gemini-flash-latest',
@@ -89,15 +86,9 @@ const MODEL_GROUPS = [
     id: 'openai',
     label: 'OpenAI',
     models: [
-      'gpt-5.2-pro',
       'gpt-5.2',
-      'gpt-5.2-chat',
       'gpt-5-mini',
       'gpt-5-nano',
-      'gpt-5-thinking',
-      'gpt-5-thinking-mini',
-      'gpt-5-thinking-nano',
-      'gpt-5-thinking-pro',
       'gpt-4.1',
       'gpt-4.1-mini',
       'gpt-4.1-nano',
@@ -109,13 +100,10 @@ const MODEL_GROUPS = [
     models: [
       'glm-5',
       'glm-4.7',
-      'glm-4.7-flashx',
       'glm-4.7-flash',
       'glm-4.6',
       'glm-4.5',
-      'glm-4.5-x',
       'glm-4.5-air',
-      'glm-4.5-airx',
       'glm-4.5-flash',
     ],
   },
@@ -940,7 +928,7 @@ function App() {
     const queryText = payload.query?.trim() || '\uac80\uc0c9 \ucffc\ub9ac';
     upsertThinkingProgress(
       stageKey,
-      `\uc6f9\uac80\uc0c9 \uc2e4\ud589 \uacb0\uacfc: "${queryText}" \uae30\uc900 \uc774\ubc88 \ucffc\ub9ac \ucd9c\ucc98 ${sources.length}\uac1c\ub97c \ud655\ubcf4\ud588\uc2b5\ub2c8\ub2e4.`, 
+      `\uc6f9\uac80\uc0c9 \uc2e4\ud589 \uacb0\uacfc: "${queryText}" \uae30\uc900 \uc774\ubc88 \ucffc\ub9ac \ucd9c\ucc98 ${sources.length}\uac1c\ub97c \ud655\ubcf4\ud588\uc2b5\ub2c8\ub2e4.`,
       { spinning: false },
     );
 
@@ -1419,10 +1407,10 @@ function App() {
         <div className="sidebar-profile">
           <div className="sidebar-profile-main">
             <div className="sidebar-user-row">
-              <span className="sidebar-user-name">issam</span>
+              <span className="sidebar-user-name">배실장</span>
               <span className="sidebar-pro-badge">Pro</span>
             </div>
-            <p className="sidebar-school">서울교육고등학교</p>
+            <p className="sidebar-school">아이쌤중학교</p>
           </div>
           <button type="button" className="sidebar-profile-more" aria-label="프로필 메뉴" title="프로필 메뉴">
             <SidebarIcon name="more" />
