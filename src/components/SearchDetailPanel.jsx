@@ -1,6 +1,23 @@
 import { useEffect, useMemo } from 'react';
 import { getDomain, getFaviconUrl } from '../utils/favicon';
 
+function normalizePreviewText(text, maxLen = 180) {
+  const cleaned = String(text || '')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`]*`/g, ' ')
+    .replace(/\bhttps?:\/\/\S+/g, ' ')
+    .replace(/[#*_>|{}[\]]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) return '';
+  if (cleaned.length <= maxLen) return cleaned;
+  return `${cleaned.slice(0, maxLen - 1)}…`;
+}
+
 function SearchDetailPanel({ data, onClose }) {
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -40,7 +57,7 @@ function SearchDetailPanel({ data, onClose }) {
         <div className="search-source-list">
           {sources.map((source) => {
             const domain = getDomain(source.url);
-            const preview = (source.content || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+            const preview = normalizePreviewText(source.content);
             const favicon = source.favicon || getFaviconUrl(source.url);
 
             return (

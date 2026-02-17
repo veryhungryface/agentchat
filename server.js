@@ -62,6 +62,23 @@ function toStringSafe(value) {
   return typeof value === 'string' ? value : '';
 }
 
+function sanitizeSearchText(text, maxLen = 420) {
+  const cleaned = toStringSafe(text)
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`]*`/g, ' ')
+    .replace(/\bhttps?:\/\/\S+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/[#*_>|{}[\]]/g, ' ')
+    .trim();
+
+  if (!cleaned) return '';
+  if (cleaned.length <= maxLen) return cleaned;
+  return `${cleaned.slice(0, maxLen - 1)}…`;
+}
+
 function normalizeTextForCompare(text) {
   return toStringSafe(text)
     .toLowerCase()
@@ -286,6 +303,100 @@ function buildHeuristicSearchPlan(userQuery) {
       ? 'Heuristic: likely multi-topic factual request.'
       : 'Heuristic: factual/procedural request; search recommended.',
   };
+}
+
+function normalizeQueryArray(rawQueries, maxQueries = 3) {
+  return [...new Set((rawQueries || []).map((q) => toStringSafe(q).trim()).filter(Boolean))].slice(
+    0,
+    maxQueries,
+  );
+}
+
+function keywordizeQueryText(text) {
+  let q = toStringSafe(text)
+    .replace(/[“”"'`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  q = q.replace(/[?.!]+$/g, '').trim();
+  q = q
+    .replace(/\b(please|tell me|show me|help me|can you|could you)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const tailPatterns = [
+    /(알려줘|알려주세요|찾아줘|검색해줘|정리해줘|요약해줘|설명해줘|만들어줘|추천해줘|해줘|해주세요)$/i,
+    /(해줄래|해줄 수 있어|부탁해)$/i,
+  ];
+  tailPatterns.forEach((pattern) => {
+    q = q.replace(pattern, '').trim();
+  });
+
+  q = q.replace(/\s+/g, ' ').trim();
+  if (!q) return '';
+  return q.slice(0, 90).trim();
+}
+
+function enforceOptimizedQueryQuality(queries, userQuery, mode, maxQueries) {
+  const source = normalizeQueryArray(queries, maxQueries);
+  const userNorm = normalizeForCompare(userQuery);
+
+  const adjusted = source.map((query) => {
+    let next = keywordizeQueryText(query) || query;
+    const nextNorm = normalizeForCompare(next);
+
+    if (!nextNorm) next = query;
+
+    if (normalizeForCompare(next) === userNorm) {
+      const base = keywordizeQueryText(userQuery) || next;
+      if (normalizeForCompare(base) !== userNorm) {
+        next = base;
+      } else {
+        const suffix = mode === 'followup' ? ' 심화' : ' 최신 정보';
+        next = `${base}${suffix}`.trim();
+      }
+    }
+
+    return next.slice(0, 90).trim();
+  });
+
+  return normalizeQueryArray(adjusted, maxQueries);
+}
+
+function normalizeForCompare(text) {
+  return toStringSafe(text)
+    .toLowerCase()
+    .replace(/[?.!,]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildFollowUpFallback(userQuery) {
+  const raw = toStringSafe(userQuery).replace(/\s+/g, ' ').trim().replace(/[?.!]+$/g, '');
+  const topic = (raw || '이 주제').slice(0, 36);
+  return [
+    `${topic}를 단계별 실행 체크리스트로 정리해줘.`,
+    `${topic}에서 우선순위 높은 작업 5가지만 뽑아줘.`,
+    `${topic} 진행 중 자주 막히는 지점과 해결법 알려줘.`,
+  ];
+}
+
+function normalizeFollowUpQuestions(rawQuestions, userQuery) {
+  const userNorm = normalizeForCompare(userQuery);
+  const seen = new Set();
+  const out = [];
+
+  (Array.isArray(rawQuestions) ? rawQuestions : [])
+    .map((item) => toStringSafe(item).replace(/\s+/g, ' ').trim())
+    .forEach((q) => {
+      if (!q) return;
+      const normalized = normalizeForCompare(q);
+      if (!normalized || normalized === userNorm || seen.has(normalized)) return;
+      seen.add(normalized);
+      out.push(q);
+    });
+
+  return out.slice(0, 3);
 }
 
 async function callGlmJson(
@@ -576,7 +687,7 @@ async function searchWeb(query, maxResults = SEARCH_RESULT_LIMITS.followup.defau
     results: (data.results || []).map((r) => ({
       title: toStringSafe(r.title),
       url: toStringSafe(r.url),
-      content: toStringSafe(r.raw_content || r.content),
+      content: sanitizeSearchText(r.content || r.raw_content),
     })),
   };
 }
@@ -644,6 +755,109 @@ async function buildInitialSearchPlan(userQuery, conversationMessages) {
   } catch (err) {
     console.error('Search planner error:', err.message);
     return heuristicPlan;
+  }
+}
+
+async function optimizeSearchQueries({ userQuery, queries, mode = 'primary', maxQueries = 3 }) {
+  const fallback = normalizeQueryArray(queries, maxQueries);
+  const qualityFallback = enforceOptimizedQueryQuality(fallback, userQuery, mode, maxQueries);
+  if (!fallback.length || !GLM4_API_KEY) return qualityFallback;
+
+  const messages = [
+    {
+      role: 'system',
+      content: [
+        'You rewrite user search queries for web retrieval quality.',
+        'Return JSON only.',
+        'Keep entity names, version numbers, and constraints.',
+        'Use concise keyword-style phrases, not long sentences.',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: [
+        `User query: "${toStringSafe(userQuery).slice(0, 240)}"`,
+        `Round mode: ${mode}`,
+        `Max queries: ${maxQueries}`,
+        `Candidate queries: ${fallback.join(' | ')}`,
+        '',
+        'Rules:',
+        '- Keep same intent; improve precision and retrieval effectiveness.',
+        '- Add key qualifiers only when they help (official docs, install, setup, latest version, etc.).',
+        '- Each query must be <= 90 chars.',
+        '- Queries must be keyword-style; avoid polite request endings.',
+        '- Do not return exactly the same sentence as user query.',
+        '- Do not output markdown or explanation.',
+        '',
+        'Return JSON schema exactly:',
+        '{"queries": string[]}',
+      ].join('\n'),
+    },
+  ];
+
+  try {
+    const rewritten = await callGlmJson(messages, {
+      model: ORCHESTRATOR_MODEL,
+      maxTokens: 220,
+      timeoutMs: 8000,
+      disableThinking: true,
+    });
+
+    const optimized = enforceOptimizedQueryQuality(rewritten?.queries, userQuery, mode, maxQueries);
+    return optimized.length > 0 ? optimized : qualityFallback;
+  } catch (err) {
+    console.error('Search query optimizer error:', err.message);
+    return qualityFallback;
+  }
+}
+
+async function generateFollowUpQuestions({ userQuery, answerText }) {
+  const fallback = buildFollowUpFallback(userQuery);
+  if (!GLM4_API_KEY) return fallback;
+
+  const trimmedAnswer = toStringSafe(answerText).replace(/\s+/g, ' ').trim().slice(0, 900);
+  const messages = [
+    {
+      role: 'system',
+      content: [
+        'You generate exactly 3 high-quality Korean follow-up questions.',
+        'Return JSON only.',
+        'Questions must be actionable and non-duplicative.',
+        'Do not repeat the user query wording.',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: [
+        `User query: "${toStringSafe(userQuery).slice(0, 240)}"`,
+        `Assistant answer summary: "${trimmedAnswer || '(empty)'}"`,
+        '',
+        'Rules:',
+        '- Output 3 concise Korean questions.',
+        '- Avoid asking exactly same as the original user query.',
+        '- Each question should be one sentence, <= 60 chars if possible.',
+        '- No numbering, no markdown.',
+        '',
+        'Return JSON schema exactly:',
+        '{"questions": string[]}',
+      ].join('\n'),
+    },
+  ];
+
+  try {
+    const parsed = await callGlmJson(messages, {
+      model: ORCHESTRATOR_MODEL,
+      maxTokens: 160,
+      timeoutMs: 4500,
+      temperature: 0.35,
+      disableThinking: true,
+    });
+
+    const normalized = normalizeFollowUpQuestions(parsed?.questions, userQuery);
+    return normalized.length > 0 ? normalized : fallback;
+  } catch (err) {
+    console.error('Follow-up generation error:', err.message);
+    return fallback;
   }
 }
 
@@ -784,7 +998,8 @@ function buildFinalMessages(messages, searchEntries) {
     ? [
         'You are a careful assistant.',
         'Use the provided search evidence when relevant.',
-        'When citing retrieved facts, include markdown links to source URLs.',
+        'Do not include inline source labels, URL lists, or a "출처" section in the answer body.',
+        'The client app will render one consolidated source list at the end.',
         'If evidence is weak or conflicting, say so explicitly.',
         '',
         '[SEARCH CONTEXT START]',
@@ -837,7 +1052,18 @@ app.post('/api/chat', async (req, res) => {
     });
 
     sendSSE(res, 'status', 'decide_search');
-    const searchPlan = await buildInitialSearchPlan(lastMessage.content, messages);
+    let searchPlan = await buildInitialSearchPlan(lastMessage.content, messages);
+    if (searchPlan.shouldSearch && searchPlan.primaryQueries.length > 0) {
+      const optimizedPrimaryQueries = await optimizeSearchQueries({
+        userQuery: lastMessage.content,
+        queries: searchPlan.primaryQueries,
+        mode: 'primary',
+        maxQueries: searchPlan.mode === 'multi' ? 3 : 1,
+      });
+      if (optimizedPrimaryQueries.length > 0) {
+        searchPlan = { ...searchPlan, primaryQueries: optimizedPrimaryQueries };
+      }
+    }
     sendSSE(res, 'search_plan', searchPlan);
     await emit({
       stage: 'decide_search',
@@ -884,11 +1110,22 @@ app.post('/api/chat', async (req, res) => {
           userQuery: lastMessage.content,
           context: { searchPlan },
         });
-        const secondDecision = await shouldDoSecondSearch(
+        let secondDecision = await shouldDoSecondSearch(
           lastMessage.content,
           searchPlan,
           firstRoundEntries,
         );
+        if (secondDecision.needsMore && secondDecision.refinedQueries.length > 0) {
+          const optimizedRefinedQueries = await optimizeSearchQueries({
+            userQuery: lastMessage.content,
+            queries: secondDecision.refinedQueries,
+            mode: 'followup',
+            maxQueries: 2,
+          });
+          if (optimizedRefinedQueries.length > 0) {
+            secondDecision = { ...secondDecision, refinedQueries: optimizedRefinedQueries };
+          }
+        }
         sendSSE(res, 'search_decision', secondDecision);
         await emit({
           stage: 'analyzing',
@@ -976,6 +1213,7 @@ app.post('/api/chat', async (req, res) => {
     const reader = glmRes.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let generatedAnswerText = '';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -991,19 +1229,31 @@ app.post('/api/chat', async (req, res) => {
 
         const data = trimmed.slice(5).trim();
         if (data === '[DONE]') {
-          res.write('data: [DONE]\n\n');
           continue;
         }
 
         try {
           const parsed = JSON.parse(data);
           const content = parsed.choices?.[0]?.delta?.content;
-          if (content) sendSSE(res, 'content', content);
+          if (content) {
+            generatedAnswerText += content;
+            sendSSE(res, 'content', content);
+          }
         } catch {
           // ignore malformed stream line
         }
       }
     }
+
+    const followUps = await generateFollowUpQuestions({
+      userQuery: lastMessage.content,
+      answerText: generatedAnswerText,
+    });
+    if (followUps.length > 0) {
+      sendSSE(res, 'follow_ups', followUps);
+    }
+
+    res.write('data: [DONE]\n\n');
 
     res.end();
   } catch (err) {

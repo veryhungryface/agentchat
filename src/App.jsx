@@ -123,6 +123,77 @@ function mergeQueries(existing = [], incoming = []) {
   return [...dedup.values()];
 }
 
+function normalizeFollowUps(raw = []) {
+  const dedup = new Set();
+  const out = [];
+  (Array.isArray(raw) ? raw : [])
+    .map((item) => (item || '').replace(/\s+/g, ' ').trim())
+    .forEach((item) => {
+      if (!item) return;
+      const key = item.toLowerCase();
+      if (dedup.has(key)) return;
+      dedup.add(key);
+      out.push(item);
+    });
+  return out.slice(0, 3);
+}
+
+function normalizeSourceTitle(source, index) {
+  const raw = (source?.title || '').replace(/\s+/g, ' ').trim();
+  const safe = raw.replaceAll('[', '').replaceAll(']', '');
+  return safe || `출처 ${index + 1}`;
+}
+
+function stripInlineSourceSections(content) {
+  const blocks = [];
+  const masked = (content || '').replace(/```[\s\S]*?```/g, (block) => {
+    const token = `@@CODE_BLOCK_${blocks.length}@@`;
+    blocks.push(block);
+    return token;
+  });
+
+  const sourceHeadingRegex = /^(?:#{1,6}\s*)?출처\s*[:：]?\s*$/i;
+  const inlineSourceRegex = /^(?:[-*]\s*)?출처\s*[:：]\s*.+$/i;
+  const sourceItemRegex =
+    /^(?:[-*]|\d+[.)])\s+(?:\[[^\]]+\]\(\s*https?:\/\/[^\s)]+(?:\s+"[^"]*")?\s*\)|https?:\/\/\S+|.+\s-\shttps?:\/\/\S+)\s*$/i;
+  const linkOnlyRegex = /^\[[^\]]+\]\(\s*https?:\/\/[^\s)]+(?:\s+"[^"]*")?\s*\)\s*$/i;
+  const urlOnlyRegex = /^https?:\/\/\S+\s*$/i;
+
+  const lines = masked.replace(/\r/g, '').split('\n');
+  const cleaned = [];
+  let inSourceBlock = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (sourceHeadingRegex.test(trimmed)) {
+      inSourceBlock = true;
+      continue;
+    }
+
+    if (!inSourceBlock && inlineSourceRegex.test(trimmed)) {
+      continue;
+    }
+
+    if (inSourceBlock) {
+      if (!trimmed) continue;
+      if (
+        sourceItemRegex.test(trimmed) ||
+        linkOnlyRegex.test(trimmed) ||
+        urlOnlyRegex.test(trimmed)
+      ) {
+        continue;
+      }
+      inSourceBlock = false;
+    }
+
+    cleaned.push(line);
+  }
+
+  const normalized = cleaned.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return normalized.replace(/@@CODE_BLOCK_(\d+)@@/g, (_, idx) => blocks[Number(idx)] || '');
+}
+
 function applyCursor(pipeline, targetIndex, { completeTarget = false } = {}) {
   pipeline.steps = pipeline.steps.map((step, idx) => {
     if (step.status === 'skipped') return step;
@@ -147,6 +218,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [detailPanelData, setDetailPanelData] = useState(null);
   const activityIdRef = useRef(0);
+  const currentQuestionRef = useRef('');
 
   const inputRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -227,7 +299,30 @@ function App() {
       }
 
       activityIdRef.current += 1;
-      pipeline.activity = [...prev, { id: activityIdRef.current, type: 'text', text: safeText }].slice(-12);
+      pipeline.activity = [...prev, { id: activityIdRef.current, type: 'text', text: safeText }].slice(-8);
+      return pipeline;
+    });
+  };
+
+  const upsertThinkingProgress = (stage, text, options = {}) => {
+    const safeText = (text || '').trim();
+    if (!safeText) return;
+    const { spinning = false } = options;
+
+    updatePipeline((pipeline) => {
+      const prev = [...(pipeline.activity || [])];
+      const existingIndex = prev.findIndex((item) => item.type === 'progress' && item.stage === stage);
+      if (existingIndex >= 0) {
+        prev[existingIndex] = { ...prev[existingIndex], text: safeText, spinning };
+        pipeline.activity = prev.slice(-8);
+        return pipeline;
+      }
+
+      activityIdRef.current += 1;
+      pipeline.activity = [
+        ...prev,
+        { id: activityIdRef.current, type: 'progress', stage, text: safeText, spinning },
+      ].slice(-8);
       return pipeline;
     });
   };
@@ -304,35 +399,35 @@ function App() {
     switch (status) {
       case 'analyze_intent':
         setStepNoteIfEmpty('analyze_intent', '사용자 요청을 접수하고 핵심 의도를 분석하는 중');
-        appendThinkingText('요청을 분석하고 있습니다.');
         break;
       case 'decide_search':
         setStepNoteIfEmpty('decide_search', '최신성/사실성 기준으로 웹검색 필요 여부를 판단하는 중');
-        appendThinkingText('검색 필요 여부를 판단하고 있습니다.');
+        upsertThinkingProgress(
+          'decide_search',
+          `요청 "${(currentQuestionRef.current || '현재 질문').slice(0, 34)}"의 검색 필요성을 확인하고 있습니다.`,
+        );
         break;
       case 'plan_queries':
         setStepNoteIfEmpty('plan_queries', '실행 순서를 포함한 Todo 리스트를 구성하는 중');
-        appendThinkingText('검색 계획을 구성하고 있습니다.');
         break;
       case 'searching':
         setStepNoteIfEmpty('search_1', 'Todo 1단계: 1차 웹검색을 실행하는 중');
-        appendThinkingText('1차 웹검색을 실행하고 있습니다.');
+        upsertThinkingProgress('searching', '웹검색을 실행하고 있습니다.', { spinning: true });
         break;
       case 'analyzing':
         setStepNoteIfEmpty('analyze_results', 'Todo 2단계: 검색 결과의 신뢰성과 누락 정보를 검토하는 중');
-        appendThinkingText('검색 결과를 검토하고 있습니다.');
+        upsertThinkingProgress('analyzing', '검색 결과를 분석하고 있습니다.');
         break;
       case 'searching_2':
         setStepNoteIfEmpty('search_2', 'Todo 3단계: 2차 웹검색을 실행하는 중');
-        appendThinkingText('2차 웹검색을 실행하고 있습니다.');
+        upsertThinkingProgress('searching_2', '누락 정보를 보강하기 위해 추가 검색 중입니다.', { spinning: true });
         break;
       case 'synthesize':
         setStepNoteIfEmpty('synthesize', '수집 근거를 바탕으로 답변 구조를 설계하는 중');
-        appendThinkingText('답변 구조를 정리하고 있습니다.');
         break;
       case 'thinking':
         setStepNoteIfEmpty('generate', '최종 답변을 작성하는 중');
-        appendThinkingText('답변 초안을 마무리하고 곧 전달하겠습니다.');
+        upsertThinkingProgress('thinking', '신중하게 생각해서 답변을 정리하고 있습니다.', { spinning: true });
         break;
       case 'streaming':
         break;
@@ -445,9 +540,13 @@ function App() {
       return assistant;
     });
 
-    if (payload.query?.trim()) {
-      appendThinkingText(`웹검색 키워드: "${payload.query.trim()}"`);
-    }
+    const stageKey = round === 2 ? 'searching_2' : 'searching';
+    const queryText = payload.query?.trim() || '검색 쿼리';
+    upsertThinkingProgress(
+      stageKey,
+      `웹검색 실행 결과: "${queryText}" 기준 출처 ${sources.length}개를 확보했습니다.`,
+      { spinning: false },
+    );
 
     if (sources.length > 0) {
       upsertThinkingSources({
@@ -477,13 +576,58 @@ function App() {
     });
   };
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    const trimmed = input.trim();
+  const finalizeLatestAssistant = () => {
+    updateLatestAssistant((assistant) => {
+      if (!assistant || assistant.isError) return assistant;
+
+      const pipeline = assistant.taskPipeline;
+      const currentContent = (assistant.content || '').trim();
+      const followUps = normalizeFollowUps(assistant.followUps || []);
+      if (!pipeline || !currentContent) {
+        return { ...assistant, followUps };
+      }
+
+      const dedup = new Map();
+      (pipeline.steps || []).forEach((step) => {
+        (step.sources || []).forEach((source) => {
+          if (source?.url) dedup.set(source.url, source);
+        });
+      });
+      const sources = [...dedup.values()];
+
+      const sanitizedContent = stripInlineSourceSections(currentContent);
+      const baseContent = sanitizedContent || currentContent;
+      let nextContent = baseContent;
+
+      if (sources.length > 0) {
+        const sourceLines = sources
+          .slice(0, 8)
+          .map((source, index) => `${index + 1}. [${normalizeSourceTitle(source, index)}](${source.url})`);
+        nextContent = baseContent
+          ? `${baseContent}\n\n### 출처\n${sourceLines.join('\n')}`
+          : `### 출처\n${sourceLines.join('\n')}`;
+      }
+
+      return {
+        ...assistant,
+        content: nextContent,
+        followUps,
+      };
+    });
+  };
+
+  const submitPrompt = async (trimmedPrompt, options = {}) => {
+    const {
+      baseConversation = messages,
+      appendUser = true,
+      clearComposer = true,
+    } = options;
+    const trimmed = (trimmedPrompt || '').trim();
     if (!trimmed || isLoading) return;
 
     const userMessage = { role: 'user', content: trimmed };
-    const nextMessages = [...messages, userMessage];
+    const nextMessages = appendUser ? [...baseConversation, userMessage] : [...baseConversation];
+    currentQuestionRef.current = trimmed;
 
     const assistantMessage = {
       role: 'assistant',
@@ -491,9 +635,10 @@ function App() {
       searchPlan: null,
       secondSearchDecision: null,
       taskPipeline: createPipeline(),
+      followUps: [],
     };
 
-    setInput('');
+    if (clearComposer) setInput('');
     setIsLoading(true);
 
     typeBufferRef.current = '';
@@ -558,6 +703,12 @@ function App() {
 
               const firstTopic = parsed.data?.primaryQueries?.[0] || '요청 주제';
               if (parsed.data?.shouldSearch) {
+                const requestPreview = (currentQuestionRef.current || firstTopic).slice(0, 42);
+                upsertThinkingProgress(
+                  'decide_search',
+                  `사용자 요청 "${requestPreview}"은 최신 근거 확인이 필요해 검색을 진행합니다.`,
+                  { spinning: false },
+                );
                 setStepNote('decide_search', `"${firstTopic}" 관련 최신/근거 확인을 위해 웹검색이 필요합니다.`);
                 setStepNote(
                   'plan_queries',
@@ -566,6 +717,12 @@ function App() {
                     : `Todo 확정: 핵심 쿼리 1개, 최대 ${parsed.data?.primaryResultCount || 5}건 검색합니다.`,
                 );
               } else {
+                const requestPreview = (currentQuestionRef.current || firstTopic).slice(0, 42);
+                upsertThinkingProgress(
+                  'decide_search',
+                  `사용자 요청 "${requestPreview}"은 검색 없이 답변 가능합니다.`,
+                  { spinning: false },
+                );
                 setStepNote('decide_search', '현재 질문은 내부 지식만으로 답변 가능한 요청입니다.');
                 setStepSkipped('plan_queries', 'Todo 확정: 검색 단계 없이 답변 작성 단계로 이동합니다.');
                 setStepSkipped('search_1');
@@ -608,12 +765,26 @@ function App() {
 
             if (parsed.type === 'search_error') {
               const stepId = parsed.data?.round === 2 ? 'search_2' : 'search_1';
+              const stageKey = parsed.data?.round === 2 ? 'searching_2' : 'searching';
+              upsertThinkingProgress(
+                stageKey,
+                `웹검색 실행 실패: ${parsed.data?.error || '알 수 없는 오류'}`,
+                { spinning: false },
+              );
               setStepNote(stepId, `검색 실패: ${parsed.data?.error || '알 수 없는 오류'}`);
               continue;
             }
 
             if (parsed.type === 'thinking_text') {
-              appendThinkingText(parsed.data);
+              // Thinking 패널은 프론트의 간결한 상태 문구만 노출합니다.
+              continue;
+            }
+
+            if (parsed.type === 'follow_ups') {
+              updateLatestAssistant((assistant) => ({
+                ...assistant,
+                followUps: normalizeFollowUps(parsed.data),
+              }));
               continue;
             }
 
@@ -656,15 +827,60 @@ function App() {
       }));
     } finally {
       await statusSequenceRef.current;
-      setIsLoading(false);
       completePipeline();
+      finalizeLatestAssistant();
+      setIsLoading(false);
       inputRef.current?.focus();
     }
   };
 
-  const handleClear = () => {
-    setMessages([]);
-    setDetailPanelData(null);
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    await submitPrompt(input);
+  };
+
+  const handleComposerKeyDown = (event) => {
+    if (event.key !== 'Enter' || event.shiftKey) return;
+    event.preventDefault();
+    if (isLoading || !input.trim()) return;
+    void submitPrompt(input);
+  };
+
+  const handleFollowUpClick = async (prompt) => {
+    await submitPrompt(prompt);
+  };
+
+  const handleCopyAnswer = async (message) => {
+    const text = (message?.content || '').trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // ignore clipboard errors
+    }
+  };
+
+  const handleRegenerateAnswer = async (assistantIndex) => {
+    if (isLoading) return;
+
+    const baseConversation = messages.slice(0, assistantIndex);
+    let userIndex = -1;
+    for (let i = baseConversation.length - 1; i >= 0; i -= 1) {
+      if (baseConversation[i]?.role === 'user') {
+        userIndex = i;
+        break;
+      }
+    }
+    if (userIndex < 0) return;
+
+    const prompt = (baseConversation[userIndex]?.content || '').trim();
+    if (!prompt) return;
+
+    await submitPrompt(prompt, {
+      baseConversation,
+      appendUser: false,
+      clearComposer: false,
+    });
   };
 
   const recentPrompts = messages
@@ -681,7 +897,7 @@ function App() {
           <div className="brand-row">
             <div className="brand-mark">
               <span className="brand-glyph" aria-hidden="true">✺</span>
-              <span className="brand-name">manus</span>
+              <span className="brand-name">issamGPT</span>
             </div>
             <button type="button" className="sidebar-collapse-btn" aria-label="사이드바 토글">
               <span aria-hidden="true">▮▮</span>
@@ -724,14 +940,14 @@ function App() {
         </section>
 
         <div className="sidebar-footer">
-          <button type="button" className="sidebar-share-btn">Manus 공유하기</button>
+          <button type="button" className="sidebar-share-btn">issamGPT 공유하기</button>
         </div>
       </aside>
 
       <div className="app">
         <header className="header">
           <div className="workspace-title-wrap">
-            <h1>Manus 1.6 Lite</h1>
+            <h1>issamGPT 1.6 Lite</h1>
             <span className="workspace-title-caret" aria-hidden="true">▾</span>
           </div>
           <div className="header-controls">
@@ -748,21 +964,24 @@ function App() {
         <main className="chat-container">
           {messages.length === 0 ? (
             <div className="empty-state">
-              <p className="empty-title">Manus에게 물어보세요.</p>
+              <p className="empty-title">issamGPT에게 물어보세요.</p>
               <p className="empty-sub">질문을 분석하고 필요한 경우에만 검색을 실행해 근거 기반 답변을 제공합니다.</p>
             </div>
           ) : (
             <div className="messages">
               {messages.map((message, idx) => (
                 <div key={idx} className="message-group">
-                  {message.taskPipeline && (
-                    <TaskPanel
-                      pipeline={message.taskPipeline}
-                      isActive={isLoading && idx === messages.length - 1}
-                      onSourcesOpen={(step) => openSourcesPanel(step)}
-                      onSourceClick={(step, source) => openSourcesPanel(step, source.url)}
-                    />
-                  )}
+                  {(() => {
+                    const isLatest = idx === messages.length - 1;
+                    return message.taskPipeline && (
+                      <TaskPanel
+                        pipeline={message.taskPipeline}
+                        isActive={isLoading && isLatest}
+                        onSourcesOpen={(step) => openSourcesPanel(step)}
+                        onSourceClick={(step, source) => openSourcesPanel(step, source.url)}
+                      />
+                    );
+                  })()}
 
                   {(message.content || message.role === 'user') && (
                     <ChatMessage
@@ -770,6 +989,57 @@ function App() {
                       isStreaming={isLoading && idx === messages.length - 1}
                     />
                   )}
+
+                  {message.role === 'assistant' &&
+                    message.content &&
+                    !message.isError &&
+                    !(isLoading && idx === messages.length - 1) && (
+                      <div className="answer-action-row">
+                        <button
+                          type="button"
+                          className="answer-action-btn"
+                          aria-label="답변 복사"
+                          title="답변 복사"
+                          onClick={() => handleCopyAnswer(message)}
+                        >
+                          ⧉
+                        </button>
+                        <button
+                          type="button"
+                          className="answer-action-btn"
+                          aria-label="답변 재생성"
+                          title="답변 재생성"
+                          onClick={() => handleRegenerateAnswer(idx)}
+                          disabled={isLoading || idx !== messages.length - 1}
+                        >
+                          ↻
+                        </button>
+                      </div>
+                    )}
+
+                  {message.role === 'assistant' &&
+                    Array.isArray(message.followUps) &&
+                    message.followUps.length > 0 &&
+                    !(isLoading && idx === messages.length - 1) && (
+                      <div className="followup-panel">
+                        <p className="followup-title">추천 후속 질문</p>
+                        <div className="followup-list">
+                          {message.followUps.slice(0, 3).map((question, followIdx) => (
+                            <button
+                              key={`${question}-${followIdx}`}
+                              type="button"
+                              className="followup-item"
+                              onClick={() => handleFollowUpClick(question)}
+                              disabled={isLoading}
+                            >
+                              <span className="followup-icon" aria-hidden="true">◌</span>
+                              <span className="followup-text">{question}</span>
+                              <span className="followup-arrow" aria-hidden="true">→</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                 </div>
               ))}
               <div ref={messagesEndRef} />
@@ -779,28 +1049,44 @@ function App() {
 
         <footer className="input-area">
           <form onSubmit={handleSubmit} className="input-form">
-            <button type="button" className="input-icon-btn" aria-label="도구 추가">
-              <span aria-hidden="true">＋</span>
-            </button>
             <label htmlFor="chat-input" className="sr-only">메시지 입력</label>
-            <input
+            <textarea
               id="chat-input"
               ref={inputRef}
-              type="text"
+              className="input-textarea"
+              rows={2}
+              name="prompt"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Manus에게 메시지 보내기"
+              onKeyDown={handleComposerKeyDown}
+              placeholder="issamGPT에게 메시지 보내기…"
+              autoComplete="off"
+              spellCheck
               disabled={isLoading}
-              autoFocus
             />
-            {messages.length > 0 && (
-              <button type="button" className="clear-btn" onClick={handleClear}>
-                초기화
-              </button>
-            )}
-            <button type="submit" className="send-btn" disabled={isLoading || !input.trim()}>
-              {isLoading ? '...' : '↑'}
-            </button>
+
+            <div className="input-toolbar">
+              <div className="input-tool-group">
+                <button type="button" className="input-icon-btn" aria-label="도구 추가">
+                  <span aria-hidden="true">＋</span>
+                </button>
+                <button type="button" className="input-icon-btn" aria-label="파일 첨부">
+                  <span aria-hidden="true">⌘</span>
+                </button>
+                <button type="button" className="input-icon-btn" aria-label="에이전트 기능">
+                  <span aria-hidden="true">✣</span>
+                </button>
+              </div>
+
+              <div className="input-action-group">
+                <button type="button" className="mic-btn" aria-label="음성 입력">
+                  <span aria-hidden="true">⌾</span>
+                </button>
+                <button type="submit" className="send-btn" aria-label="전송" disabled={isLoading || !input.trim()}>
+                  {isLoading ? '…' : '↑'}
+                </button>
+              </div>
+            </div>
           </form>
         </footer>
       </div>
