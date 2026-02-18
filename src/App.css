@@ -1266,6 +1266,8 @@
 
 .input-action-group {
   position: relative;
+  min-height: 52px;
+  padding-right: 125px;
 }
 
 .model-picker {
@@ -1273,8 +1275,9 @@
 }
 
 .model-picker-btn {
+  width: 210px;
   min-width: 210px;
-  max-width: 300px;
+  max-width: 210px;
   height: 52px;
   border: 1px solid #e1e1e1;
   border-radius: 8px;
@@ -1392,6 +1395,10 @@
 }
 
 .generate-btn {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 115px;
   min-width: 115px;
   height: 52px;
   border: none;
@@ -1521,10 +1528,25 @@ textarea:focus-visible {
   }
 
   .model-picker-btn {
-    min-width: 146px;
-    max-width: 180px;
+    width: 160px;
+    min-width: 160px;
+    max-width: 160px;
     height: 44px;
     font-size: 13px;
+  }
+
+  .input-action-group {
+    min-height: 44px;
+    padding-right: 104px;
+  }
+
+  .generate-btn {
+    width: 96px;
+    min-width: 96px;
+    height: 44px;
+    padding: 10px 12px;
+    font-size: 14px;
+    gap: 6px;
   }
 
   .model-menu {
