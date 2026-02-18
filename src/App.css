@@ -1518,16 +1518,17 @@ textarea:focus-visible {
   }
 
   .input-hint-bar {
-    font-size: 15px;
+    display: none;
   }
 
   .input-textarea {
-    font-size: 18px;
-    padding: 16px 16px 8px;
+    font-size: 17px;
+    min-height: 40px;
+    padding: 12px 14px 6px;
   }
 
   .input-toolbar {
-    padding: 0 12px 12px;
+    padding: 0 10px 10px;
     justify-content: flex-end;
   }
 

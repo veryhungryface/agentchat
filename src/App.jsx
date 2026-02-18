@@ -604,7 +604,13 @@ function App() {
 
     const updateReserve = () => {
       const h = Math.ceil(formEl.getBoundingClientRect().height || 0);
-      const next = Math.max(160, h + COMPOSER_CLEARANCE_PX);
+      const isMobile =
+        typeof window !== 'undefined' &&
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(max-width: 700px)').matches;
+      const minReserve = isMobile ? 118 : 160;
+      const clearance = isMobile ? 4 : COMPOSER_CLEARANCE_PX;
+      const next = Math.max(minReserve, h + clearance);
       setComposerReservePx((prev) => (Math.abs(prev - next) > 1 ? next : prev));
     };
 
@@ -1689,4 +1695,3 @@ function App() {
 }
 
 export default App;
-
