@@ -491,6 +491,7 @@ function App() {
     return saved && MODEL_IDS.has(saved) ? saved : DEFAULT_CHAT_MODEL;
   });
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const [modelMenuStyle, setModelMenuStyle] = useState({});
   const [composerReservePx, setComposerReservePx] = useState(212);
   const [followUpSpacerPx, setFollowUpSpacerPx] = useState(0);
   const activityIdRef = useRef(0);
@@ -499,6 +500,7 @@ function App() {
   const inputRef = useRef(null);
   const inputFormRef = useRef(null);
   const modelPickerRef = useRef(null);
+  const modelMenuRef = useRef(null);
   const chatContainerRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
 
@@ -548,6 +550,53 @@ function App() {
       document.removeEventListener('keydown', onEscape);
     };
   }, [isModelMenuOpen]);
+
+  useLayoutEffect(() => {
+    if (!isModelMenuOpen) {
+      setModelMenuStyle({});
+      return undefined;
+    }
+
+    const updateMenuPosition = () => {
+      const pickerEl = modelPickerRef.current;
+      if (!pickerEl || typeof window === 'undefined') return;
+
+      const rect = pickerEl.getBoundingClientRect();
+      const viewportWidth = window.innerWidth || 0;
+      const viewportHeight = window.innerHeight || 0;
+      const isMobile = viewportWidth <= 700;
+
+      const sidePadding = isMobile ? 12 : 16;
+      const minWidth = isMobile ? 220 : 260;
+      const desiredWidth = isMobile ? Math.min(360, viewportWidth - sidePadding * 2) : Math.min(360, viewportWidth - sidePadding * 2);
+      const menuWidth = Math.max(minWidth, desiredWidth);
+
+      let left = rect.right - menuWidth;
+      const minLeft = sidePadding;
+      const maxLeft = Math.max(sidePadding, viewportWidth - sidePadding - menuWidth);
+      left = Math.max(minLeft, Math.min(left, maxLeft));
+
+      // Open upward from the model picker button, but keep usable height on short viewports.
+      const bottom = Math.max(8, viewportHeight - rect.top + 8);
+      const maxHeight = Math.max(160, rect.top - 12);
+
+      setModelMenuStyle({
+        left: `${Math.round(left)}px`,
+        bottom: `${Math.round(bottom)}px`,
+        width: `${Math.round(menuWidth)}px`,
+        maxHeight: `${Math.round(maxHeight)}px`,
+      });
+    };
+
+    updateMenuPosition();
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('orientationchange', updateMenuPosition);
+
+    return () => {
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('orientationchange', updateMenuPosition);
+    };
+  }, [isModelMenuOpen, selectedModel]);
 
   useLayoutEffect(() => {
     const formEl = inputFormRef.current;
@@ -1586,7 +1635,13 @@ function App() {
                   </button>
 
                   {isModelMenuOpen && (
-                    <div className="model-menu" role="listbox" aria-label="모델 목록">
+                    <div
+                      ref={modelMenuRef}
+                      className="model-menu"
+                      style={modelMenuStyle}
+                      role="listbox"
+                      aria-label="모델 목록"
+                    >
                       {MODEL_GROUPS.map((group) => (
                         <section key={group.id} className="model-menu-group" aria-label={group.label}>
                           <p className="model-menu-group-title">{group.label}</p>
