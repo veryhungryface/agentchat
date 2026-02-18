@@ -1525,6 +1525,7 @@ textarea:focus-visible {
 
   .input-toolbar {
     padding: 0 12px 12px;
+    justify-content: flex-end;
   }
 
   .model-picker-btn {
