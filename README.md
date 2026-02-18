@@ -42,12 +42,18 @@ OPENAI_API_KEY=YOUR_OPENAI_KEY
 GLM_API_KEY=YOUR_GLM_KEY
 GLM_BASE_URL=https://api.z.ai/api/coding/paas/v4
 TAVILY_API_KEY=YOUR_TAVILY_KEY
+
+# CORS (recommended for production)
+FRONTEND_ORIGIN=https://issam-concept.vercel.app
+# Optional: comma-separated allowlist
+# CORS_ALLOWED_ORIGINS=https://issam-concept.vercel.app,https://www.your-domain.com
 ```
 
 Optional:
 
 1. `OPENAI_BASE_URL` (if using custom OpenAI-compatible endpoint)
 2. `GEMINI_BASE_URL` (if using custom Gemini endpoint)
+3. `CORS_ALLOWED_ORIGINS` (comma-separated frontend domains)
 
 ## 4. Run Backend with PM2
 
@@ -107,6 +113,14 @@ In Vercel project settings:
 3. Redeploy the frontend
 
 ## 8. Health Check
+
+```bash
+curl -i https://api.your-domain.com/health
+```
+
+Expected: `200 OK` with JSON (`ok: true`).
+
+Then test search endpoint:
 
 ```bash
 curl -i https://api.your-domain.com/api/search -X POST \

@@ -7,8 +7,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
-app.use(cors());
-app.use(express.json());
 
 const {
   GLM_API_KEY = '',
@@ -29,9 +27,33 @@ const {
   GEMINI_API_KEY = '',
   GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta',
   GEMINI_MODEL = 'gemini-2.5-flash',
+  FRONTEND_ORIGIN = '',
+  CORS_ALLOWED_ORIGINS = '',
   TAVILY_API_KEY,
   PORT = 3001,
 } = process.env;
+
+function parseAllowedOrigins(...rawValues) {
+  return [...new Set(
+    rawValues
+      .flatMap((value) => toStringSafe(value).split(','))
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+  )];
+}
+
+const ALLOWED_ORIGINS = parseAllowedOrigins(FRONTEND_ORIGIN, CORS_ALLOWED_ORIGINS);
+const HAS_CORS_ALLOWLIST = ALLOWED_ORIGINS.length > 0;
+const CORS_OPTIONS = {
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (!HAS_CORS_ALLOWLIST) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
 
 const RESOLVED_GLM_API_KEY = GLM_API_KEY || GLM4_API_KEY || '';
 const RESOLVED_GLM_BASE_URL = GLM_BASE_URL || GLM4_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
@@ -44,6 +66,26 @@ const FOLLOWUP_MODEL = FOLLOWUP_MODEL_ENV || LEGACY_GLM_FOLLOWUP_MODEL || 'glm-4
 const GLM_RESPONSE_API_KEY = RESOLVED_GLM_API_KEY;
 const GLM_RESPONSE_BASE_URL = RESOLVED_GLM_BASE_URL;
 const GLM_RESPONSE_MODEL = RESOLVED_GLM_MODEL;
+
+app.use(cors(CORS_OPTIONS));
+app.options(/.*/, cors(CORS_OPTIONS));
+app.use(express.json());
+
+function logStartupStatus() {
+  const hasLlmApiKey = Boolean(OPENAI_API_KEY || GEMINI_API_KEY || RESOLVED_GLM_API_KEY);
+  if (!hasLlmApiKey) {
+    console.warn('[startup] No LLM API key found. Set OPENAI_API_KEY, GEMINI_API_KEY, or GLM_API_KEY.');
+  }
+  if (!TAVILY_API_KEY) {
+    console.warn('[startup] TAVILY_API_KEY is missing. Web search features will be skipped.');
+  }
+
+  if (HAS_CORS_ALLOWLIST) {
+    console.log(`[startup] CORS allowlist enabled: ${ALLOWED_ORIGINS.join(', ')}`);
+  } else {
+    console.log('[startup] CORS allowlist disabled: allowing all origins.');
+  }
+}
 
 const SEARCH_PLAN_FALLBACK = {
   shouldSearch: false,
@@ -196,6 +238,7 @@ function normalizeSearchPlan(plan, _originalQuery) {
     : [];
 
   primaryQueries = [...new Set(primaryQueries)];
+  const safeQuery = keywordizeQueryText(_originalQuery);
 
   if (shouldSearch && primaryQueries.length === 0 && safeQuery) {
     primaryQueries = [safeQuery];
@@ -1283,7 +1326,7 @@ async function generateFollowUpQuestions({ userQuery, answerText }) {
     const fromText = toStringSafe(raw)
       .replace(/```[\s\S]*?```/g, '')
       .split('\n')
-      .map((line) => line.replace(/^[\-\d.)\s]+/, '').trim())
+      .map((line) => line.replace(/^[-\d.)\s]+/, '').trim())
       .filter(Boolean);
 
     const normalizedRetry = normalizeFollowUpQuestions(fromText, userQuery);
@@ -1726,8 +1769,21 @@ app.post('/api/search', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+app.get('/health', (_req, res) => {
+  res.json({
+    ok: true,
+    service: 'agentchat-api',
+    timestamp: new Date().toISOString(),
+    searchReady: Boolean(TAVILY_API_KEY),
+    models: {
+      orchestrator: ORCHESTRATOR_MODEL,
+      response: RESPONSE_MODEL,
+      followup: FOLLOWUP_MODEL,
+    },
+  });
 });
 
-
+app.listen(PORT, () => {
+  logStartupStatus();
+  console.log(`Server running on http://localhost:${PORT}`);
+});
