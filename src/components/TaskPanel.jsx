@@ -39,7 +39,7 @@ function TaskPanel({ pipeline, isActive, onSourceClick, onSourcesOpen }) {
 
   const activities = useMemo(() => pipeline.activity || [], [pipeline.activity]);
   const summaryText = formatElapsed(elapsedMs);
-  const thinkingDots = '.'.repeat(((Math.floor(elapsedMs / 450) % 3) + 1)).padEnd(3, ' ');
+  const thinkingDots = '.'.repeat(Math.floor(elapsedMs / 450) % 4).padEnd(3, ' ');
   const showCollapsedSummary = pipeline.isComplete && !isActive && !expandedAfterComplete;
 
   return (
