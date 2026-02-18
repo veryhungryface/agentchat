@@ -1506,6 +1506,15 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'last message must be from user' });
     }
 
+    // Start follow-up generation early so it can run in parallel with search/streaming.
+    const followUpsPrefetchPromise = generateFollowUpQuestions({
+      userQuery: lastMessage.content,
+      answerText: '',
+    }).catch((err) => {
+      console.error('Follow-up prefetch error:', err.message);
+      return [];
+    });
+
     const thinkingHistory = [];
     const emittedThinkingKeys = new Set();
     const emit = (payload) =>
@@ -1723,10 +1732,17 @@ app.post('/api/chat', async (req, res) => {
       res,
     });
 
-    const followUps = await generateFollowUpQuestions({
-      userQuery: lastMessage.content,
-      answerText: generatedAnswerText,
-    });
+    let followUps = await followUpsPrefetchPromise;
+    if (!Array.isArray(followUps)) followUps = [];
+
+    // If prefetch produced nothing, regenerate once with full answer context.
+    if (followUps.length === 0) {
+      followUps = await generateFollowUpQuestions({
+        userQuery: lastMessage.content,
+        answerText: generatedAnswerText,
+      });
+    }
+
     if (followUps.length > 0) {
       sendSSE(res, 'follow_ups', followUps);
     }
