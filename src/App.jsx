@@ -117,7 +117,7 @@ const MODEL_GROUPS = [
 ];
 
 const MODEL_IDS = new Set(MODEL_GROUPS.flatMap((group) => group.models));
-const DEFAULT_CHAT_MODEL = 'glm-4.7-flash';
+const DEFAULT_CHAT_MODEL = 'gpt-5.2';
 
 function truncateLabel(text, max = 26) {
   if (!text) return '';
@@ -1689,5 +1689,4 @@ function App() {
 }
 
 export default App;
-
 
