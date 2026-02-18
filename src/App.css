@@ -836,6 +836,9 @@
 .task-panel-title-dots {
   display: inline-block;
   width: 3ch;
+  margin-left: 2px;
+  text-align: left;
+  white-space: pre;
   color: #9ca3af;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
@@ -1064,7 +1067,7 @@
   position: fixed;
   inset: 0;
   background: rgba(23, 23, 23, 0.22);
-  z-index: 40;
+  z-index: 140;
 }
 
 .search-detail-panel {
@@ -1073,10 +1076,10 @@
   top: 0;
   width: var(--detail-panel-width);
   max-width: calc(100vw - 12px);
-  height: 100vh;
+  height: 100dvh;
   border-left: 1px solid #efefef;
   background: #fff;
-  padding: 16px;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: 12px;

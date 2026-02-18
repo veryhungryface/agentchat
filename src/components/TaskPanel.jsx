@@ -58,7 +58,6 @@ function TaskPanel({ pipeline, isActive, onSourceClick, onSourcesOpen }) {
             Thinking 과정
             {!pipeline.isComplete && (
               <span className="task-panel-title-dots" aria-hidden="true">
-                {' '}
                 {thinkingDots}
               </span>
             )}
