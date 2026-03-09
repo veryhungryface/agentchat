@@ -19,7 +19,6 @@
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "katex": "^0.16.28",
-    "playwright": "^1.58.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
@@ -29,6 +28,9 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "zod": "^4.3.6"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.58.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

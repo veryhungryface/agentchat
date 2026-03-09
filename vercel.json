@@ -1,11 +1,5 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "framework": "vite",
-  "installCommand": "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install",
-  "functions": {
-    "api/**/*.js": {
-      "maxDuration": 60
-    }
-  }
+  "installCommand": "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install"
 }
