@@ -58,7 +58,7 @@ async function generateFollowUps(answer, userQuery, model) {
       { role: 'user', content: userQuery },
       { role: 'assistant', content: answer.slice(0, 1500) },
       { role: 'user', content: '위 답변을 바탕으로 사용자가 이어서 물어볼 만한 후속 질문 3개를 JSON 배열 형태로만 응답해주세요. 예: ["질문1", "질문2", "질문3"]' },
-    ], { temperature: 0.6, maxTokens: 300 });
+    ], { temperature: 0.6, maxTokens: 600 });
 
     const match = text.match(/\[[\s\S]*\]/);
     if (match) {
@@ -139,13 +139,13 @@ app.post('/api/chat', async (req, res) => {
 
     const agentResults = await dispatchAgents(agentList, apiMessages, mainModel, fastModel, {
       onAgentStart: (label, type) => {
-        sendSSE(res, 'thinking_update', { stage: `agent_${type}`, text: `${label} 실행 중...` });
+        sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${label} 실행 중...` });
         if (type === 'research' || type === 'browser') {
           sendSSE(res, 'status', 'searching');
         }
       },
-      onAgentComplete: (label, success, type) => {
-        sendSSE(res, 'thinking_update', { stage: `agent_${type}`, text: success ? `${label} 완료 ✓` : `${label} 실패 ✗` });
+      onAgentComplete: (label, success) => {
+        sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: success ? `${label} 완료 ✓` : `${label} 실패 ✗` });
       },
       onScreenshot: (screenshot) => {
         sendSSE(res, 'browser_screenshot', screenshot);
@@ -174,14 +174,23 @@ app.post('/api/chat', async (req, res) => {
 
     sendSSE(res, 'status', 'streaming');
     let fullAnswer = '';
+    let followUpPromise = null;
     for await (const chunk of synthesizeResults(agentResults, apiMessages, mainModel)) {
       fullAnswer += chunk;
       sendSSE(res, 'content', chunk);
+      // Start follow-up generation early once we have enough content
+      if (!followUpPromise && fullAnswer.length > 200) {
+        followUpPromise = generateFollowUps(fullAnswer, lastUserMsg, fastModel);
+      }
     }
     t4();
 
-    // ── Stage 6: Follow-up questions ──────────────────────────────────────────
-    const followUps = await generateFollowUps(fullAnswer, lastUserMsg, fastModel);
+    // If answer was too short to trigger early generation, start now
+    if (!followUpPromise) {
+      followUpPromise = generateFollowUps(fullAnswer, lastUserMsg, fastModel);
+    }
+
+    const followUps = await followUpPromise;
     if (followUps.length > 0) {
       sendSSE(res, 'follow_ups', followUps);
     }

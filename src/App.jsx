@@ -6,7 +6,7 @@ import SearchDetailPanel from './components/SearchDetailPanel';
 import { getFaviconUrl } from './utils/favicon';
 import './App.css';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002';
 
 function readTypingEnvInt(name, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   const raw = import.meta.env?.[name];
@@ -849,39 +849,26 @@ function App() {
   const setStatusNarration = (status) => {
     switch (status) {
       case 'screening':
-        setStepNoteIfEmpty('screening', '사용자 요청의 안전성을 검사하는 중');
-        upsertThinkingProgress('screening', '안전성 검사를 수행하고 있습니다.', { spinning: true });
         break;
       case 'routing':
         setProgressSpinning('screening', false);
-        setStepNoteIfEmpty('routing', '질문을 분석하고 최적의 에이전트를 선택하는 중');
-        upsertThinkingProgress('routing', '질문을 분석하고 에이전트를 선택하고 있습니다.', { spinning: true });
         break;
       case 'executing':
         setProgressSpinning('routing', false);
-        setStepNoteIfEmpty('agent_exec', '선택된 에이전트가 병렬로 실행 중');
-        upsertThinkingProgress('executing', '에이전트를 실행하고 있습니다.', { spinning: true });
         break;
       case 'searching':
-        setStepNoteIfEmpty('search', 'Playwright 브라우저로 웹 검색 실행 중');
-        upsertThinkingProgress('searching', '실시간 웹 검색을 수행하고 있습니다.', { spinning: true });
         break;
       case 'search_skipped':
         setStepSkipped('search', '웹 검색이 필요하지 않은 요청입니다.');
         break;
       case 'synthesize':
-        setProgressSpinning('executing', false);
-        setProgressSpinning('searching', false);
-        setStepNoteIfEmpty('synthesize', '에이전트 결과를 종합하여 답변 구조를 설계하는 중');
-        upsertThinkingProgress('synthesize', '결과를 종합하고 있습니다.', { spinning: true });
+        setProgressSpinning('agent_exec', false);
+        setProgressSpinning('browser', false);
         break;
       case 'streaming':
         setProgressSpinning('synthesize', false);
-        setStepNoteIfEmpty('generate', '답변을 작성하고 있습니다.');
-        upsertThinkingProgress('streaming', '답변을 작성하고 있습니다.', { spinning: true });
         break;
       case 'rejected':
-        setStepNote('screening', '안전성 검사 불통과');
         break;
       default:
         break;
