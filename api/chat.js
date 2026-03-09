@@ -148,7 +148,8 @@ ${results[0].result}
 </reference>
 
 Present the information naturally as your own response. Do NOT mention agents or internal processing.
-Do NOT use meta-commentary. Respond directly in the same language as the user.`;
+Do NOT use meta-commentary. Do NOT include any URLs, links, or "출처"/"참고"/"References" sections — source citations are handled separately.
+Respond directly in the same language as the user.`;
   }
 
   const sources = results.map((r, i) => `<source${i + 1}>\n${r.result}\n</source${i + 1}>`).join('\n\n');
@@ -157,6 +158,7 @@ Do NOT use meta-commentary. Respond directly in the same language as the user.`;
 ${sources}
 
 Combine into one coherent response. Do NOT mention sources or agents.
+Do NOT include any URLs, links, or "출처"/"참고"/"References" sections — source citations are handled separately.
 Respond directly in the same language as the user. Use markdown where appropriate.`;
 }
 

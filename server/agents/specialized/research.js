@@ -62,7 +62,7 @@ Respond in the same language as the user.`,
   ];
 
   const analysis = await generate(model, analysisMessages, {
-    system: `You are a research specialist. Analyze the web search results and provide a thorough, well-sourced answer. Include relevant URLs as references. Respond in the same language as the user.`,
+    system: `You are a research specialist. Analyze the web search results and provide a thorough, well-informed answer. Do NOT include any URLs, links, or source/reference sections — source citations are handled separately by the system. Respond in the same language as the user.`,
     temperature: 0.5,
     maxTokens: 2048,
   });

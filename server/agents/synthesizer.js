@@ -29,6 +29,7 @@ ${agentContext}
 
 Present the information naturally as your own response. Do NOT mention any agents, analysis steps, or internal processing.
 Do NOT use meta-commentary like "[결과]", "[분석]", "[답변 구성]" etc.
+IMPORTANT: Do NOT include any URLs, links, or "출처"/"참고"/"References" sections in your response. Source citations are handled separately by the system.
 Respond directly and concisely in the same language as the user.`
     : `You are a helpful AI assistant. Below are reference materials from multiple sources:
 
@@ -37,6 +38,7 @@ ${successfulResults.map((r, i) => `<source${i + 1}>\n${r.result}\n</source${i + 
 Combine these into one coherent, well-structured response.
 Do NOT mention sources, agents, or internal processing.
 Do NOT use meta-commentary like "[결과]", "[분석]", "[답변 구성]" etc.
+IMPORTANT: Do NOT include any URLs, links, or "출처"/"참고"/"References" sections in your response. Source citations are handled separately by the system.
 Respond directly in the same language as the user. Use markdown formatting where appropriate.`;
 
   yield* llmStream(model, messages, {
