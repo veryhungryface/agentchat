@@ -1,17 +1,14 @@
-import { runResearchAgent } from './specialized/research.js';
-import { runCodingAgent } from './specialized/coding.js';
-import { runMathAgent } from './specialized/math.js';
-import { runCreativeAgent } from './specialized/creative.js';
-import { runGeneralAgent } from './specialized/general.js';
-import { runBrowserAgent } from './specialized/browser.js';
+// Dynamic imports to avoid Playwright dependency at module load time.
+// This allows the module to work in serverless environments (Vercel)
+// where Playwright is not available.
 
-const AGENT_MAP = {
-  research: runResearchAgent,
-  coding: runCodingAgent,
-  math: runMathAgent,
-  creative: runCreativeAgent,
-  general: runGeneralAgent,
-  browser: runBrowserAgent,
+const AGENT_LOADERS = {
+  research: () => import('./specialized/research.js').then((m) => m.runResearchAgent),
+  coding: () => import('./specialized/coding.js').then((m) => m.runCodingAgent),
+  math: () => import('./specialized/math.js').then((m) => m.runMathAgent),
+  creative: () => import('./specialized/creative.js').then((m) => m.runCreativeAgent),
+  general: () => import('./specialized/general.js').then((m) => m.runGeneralAgent),
+  browser: () => import('./specialized/browser.js').then((m) => m.runBrowserAgent),
 };
 
 const AGENT_LABELS = {
@@ -41,17 +38,20 @@ export async function dispatchAgents(agents, messages, mainModel, fastModel, cal
       onAgentStart?.(label, agentType);
 
       const model = agentType === 'general' ? fastModel : mainModel;
-      const fn = AGENT_MAP[agentType];
-      if (!fn) {
+      const loader = AGENT_LOADERS[agentType];
+      if (!loader) {
+        onAgentComplete?.(label, false, agentType);
         return { agentName: label, result: '', success: false, error: `Unknown agent: ${agentType}` };
       }
 
       try {
+        const fn = await loader();
         const needsScreenshot = agentType === 'research' || agentType === 'browser';
         const result = await fn(messages, model, needsScreenshot ? onScreenshot : undefined);
         onAgentComplete?.(label, true, agentType);
         return { agentName: label, result, success: true };
       } catch (err) {
+        console.error(`[dispatcher] ${label} error:`, err.message);
         onAgentComplete?.(label, false, agentType);
         return { agentName: label, result: '', success: false, error: err.message };
       }

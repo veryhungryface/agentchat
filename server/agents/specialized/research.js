@@ -1,8 +1,31 @@
 import { generate } from '../../llm.js';
-import { playwrightSearch } from '../../tools/playwright-search.js';
+
+// Dynamic import: Playwright may not be available in serverless environments
+async function getPlaywrightSearch() {
+  try {
+    const mod = await import('../../tools/playwright-search.js');
+    return mod.playwrightSearch;
+  } catch {
+    return null;
+  }
+}
 
 export async function runResearchAgent(messages, model, onScreenshot) {
   const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
+
+  const playwrightSearch = await getPlaywrightSearch();
+
+  // Fallback: no Playwright available (serverless) — use LLM knowledge directly
+  if (!playwrightSearch) {
+    console.log('[research] Playwright not available, using LLM knowledge');
+    return generate(model, messages, {
+      system: `You are a research specialist AI agent. Answer the user's question using your training knowledge.
+Be thorough, accurate, and provide specific details. If you're unsure, say so.
+Respond in the same language as the user.`,
+      temperature: 0.5,
+      maxTokens: 2048,
+    });
+  }
 
   // Generate search query
   const searchQuery = await generate(model, [
