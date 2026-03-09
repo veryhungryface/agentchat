@@ -11,31 +11,34 @@ export async function classifyQuery(query, model) {
 Analyze the user message and determine which specialized agent(s) should handle it.
 
 Available agents:
-- "general": Simple greetings, casual conversation, basic knowledge questions
-- "research": Questions requiring current/factual info, news, comparisons, anything needing web search
-- "coding": Code writing, debugging, code review, algorithms, architecture
-- "math": Math problems, statistics, numerical analysis, calculations
-- "creative": Creative writing, brainstorming, storytelling, marketing copy
+- "general": ONLY for simple greetings (안녕, hi) or trivial meta-questions (넌 뭐야?)
+- "research": Questions needing web search — current events, facts, news, "~에 대해 알려줘", comparisons
+- "browser": Requests involving a SPECIFIC WEBSITE — "쿠팡에서 검색", "사이트 접속해서 테스트", "로그인해서 확인", product search on specific sites, price comparison on shopping sites, scraping a specific URL
+- "coding": Code writing, debugging, algorithms, architecture, programming questions
+- "math": Math problems, calculations, statistics, numerical analysis
+- "creative": Creative writing, brainstorming, storytelling, poetry, marketing copy
 
 Respond with JSON:
 {
-  "category": "general" | "research" | "coding" | "math" | "creative",
+  "category": "general" | "research" | "browser" | "coding" | "math" | "creative",
   "complexity": "simple" | "complex",
-  "requiresMultipleAgents": false,
-  "suggestedAgents": ["agent1", "agent2"],
+  "suggestedAgents": ["agent1"],
   "reasoning": "brief explanation"
 }
 
-Rules:
-- For simple greetings or trivial questions, use ["general"] only.
-- If the question requires up-to-date information or facts you're not sure about, include "research".
-- Complex questions may need multiple agents (e.g. "research + math" for data analysis with current data).
-- Most questions need only 1 agent. Use 2+ only for genuinely multi-faceted requests.`,
+CRITICAL routing rules (follow strictly):
+- If the user mentions a specific website/service name (쿠팡, 네이버, 11번가, Amazon, etc.) and wants to search/browse/interact with it → "browser"
+- If the user wants to log in, test a site, click menus, scrape product lists → "browser"
+- If the user asks a factual question without mentioning a specific site → "research"
+- "general" is ONLY for greetings and very simple chat. Any real question should go to a specialized agent.
+- Shopping/product/price queries mentioning a specific store → "browser"
+- Shopping/product queries WITHOUT a specific store → "research"
+- Most questions need only 1 agent. Use 2 only for genuinely multi-faceted requests.`,
       temperature: 0.2,
-      maxTokens: 300,
+      maxTokens: 600,
     });
 
-    const validAgents = new Set(['general', 'research', 'coding', 'math', 'creative']);
+    const validAgents = new Set(['general', 'research', 'browser', 'coding', 'math', 'creative']);
     const suggestedAgents = (result.suggestedAgents || [result.category || 'general'])
       .filter((a) => validAgents.has(a));
 

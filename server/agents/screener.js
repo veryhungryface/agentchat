@@ -13,9 +13,15 @@ export async function screenQuery(query, model) {
   "category": "safe" | "inappropriate" | "harmful" | "spam",
   "reason": "brief explanation"
 }
-Be lenient with normal questions. Only flag truly harmful content.`,
+
+IMPORTANT rules:
+- Default to safe=true. Almost all questions should be safe.
+- Only flag as unsafe if the message explicitly requests: creating malware/viruses, generating CSAM, detailed instructions for weapons/explosives/drugs, or targeted harassment of real individuals.
+- Coding questions, login/auth testing, security research, penetration testing, hacking tutorials, web scraping, data extraction — ALL are safe.
+- Questions about controversial topics, politics, adult themes — safe.
+- When in doubt, mark as safe.`,
       temperature: 0.1,
-      maxTokens: 200,
+      maxTokens: 400,
     });
 
     return {

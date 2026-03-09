@@ -49,7 +49,7 @@ function sendSSE(res, type, data) {
 
 // ── Model defaults ───────────────────────────────────────────────────────────
 const DEFAULT_MAIN_MODEL = 'gemini-3-flash-preview';
-const DEFAULT_FAST_MODEL = 'gpt-5-nano';
+const DEFAULT_FAST_MODEL = 'gemini-3-flash-preview';
 
 // ── Follow-up generation ─────────────────────────────────────────────────────
 async function generateFollowUps(answer, userQuery, model) {
@@ -125,7 +125,7 @@ app.post('/api/chat', async (req, res) => {
       labels: agentLabels,
       reasoning: routing.reasoning,
     });
-    const hasSearch = agentList.includes('research');
+    const hasSearch = agentList.includes('research') || agentList.includes('browser');
     sendSSE(res, 'thinking_update', { stage: 'routing', text: `${agentLabels.join(', ')} 선택됨 ✓` });
 
     // If no search needed, skip search steps
@@ -140,7 +140,7 @@ app.post('/api/chat', async (req, res) => {
     const agentResults = await dispatchAgents(agentList, apiMessages, mainModel, fastModel, {
       onAgentStart: (label, type) => {
         sendSSE(res, 'thinking_update', { stage: `agent_${type}`, text: `${label} 실행 중...` });
-        if (type === 'research') {
+        if (type === 'research' || type === 'browser') {
           sendSSE(res, 'status', 'searching');
         }
       },

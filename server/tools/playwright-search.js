@@ -206,12 +206,22 @@ export async function playwrightSearch(query, onScreenshot) {
       return items;
     });
 
-    // Visit first result
-    if (results.length > 0 && results[0].url) {
+    // Visit first accessible result (skip bot-blocking sites)
+    const BLOCKED_DOMAINS = /coupang\.com|naver\.com|daum\.net|tistory\.com|instagram\.com|facebook\.com|twitter\.com|x\.com/i;
+    const ACCESS_DENIED_RE = /access denied|403 forbidden|you don't have permission|비정상적인 접근/i;
+
+    for (const result of results.slice(0, 3)) {
+      if (!result.url || BLOCKED_DOMAINS.test(result.url)) continue;
       try {
-        await page.goto(results[0].url, { waitUntil: 'domcontentloaded', timeout: 8000 });
+        const resp = await page.goto(result.url, { waitUntil: 'domcontentloaded', timeout: 8000 });
+        if (resp && (resp.status() === 403 || resp.status() === 401)) continue;
+
         await page.waitForTimeout(1500);
-        await screenshot(page, `📖 "${results[0].title.slice(0, 40)}" 열람 중...`, onScreenshot);
+
+        const isBlocked = await page.evaluate((re) => new RegExp(re).test((document.title + ' ' + (document.body?.innerText || '').slice(0, 500))), ACCESS_DENIED_RE.source);
+        if (isBlocked) continue;
+
+        await screenshot(page, `📖 "${result.title.slice(0, 40)}" 열람 중...`, onScreenshot);
 
         const pageContent = await page.evaluate(() => {
           const el = document.querySelector('article') || document.querySelector('main') || document.querySelector('.content') || document.body;
@@ -219,8 +229,8 @@ export async function playwrightSearch(query, onScreenshot) {
         });
 
         await screenshot(page, '✅ 정보 수집 완료', onScreenshot);
-        return { query, results, pageContent, source: results[0].url };
-      } catch { /* skip */ }
+        return { query, results, pageContent, source: result.url };
+      } catch { /* try next */ }
     }
 
     await screenshot(page, '✅ 검색 완료', onScreenshot);

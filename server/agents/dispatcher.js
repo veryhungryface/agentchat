@@ -3,6 +3,7 @@ import { runCodingAgent } from './specialized/coding.js';
 import { runMathAgent } from './specialized/math.js';
 import { runCreativeAgent } from './specialized/creative.js';
 import { runGeneralAgent } from './specialized/general.js';
+import { runBrowserAgent } from './specialized/browser.js';
 
 const AGENT_MAP = {
   research: runResearchAgent,
@@ -10,6 +11,7 @@ const AGENT_MAP = {
   math: runMathAgent,
   creative: runCreativeAgent,
   general: runGeneralAgent,
+  browser: runBrowserAgent,
 };
 
 const AGENT_LABELS = {
@@ -18,6 +20,7 @@ const AGENT_LABELS = {
   math: '수학 에이전트',
   creative: '크리에이티브 에이전트',
   general: '일반 에이전트',
+  browser: '브라우저 에이전트',
 };
 
 /**
@@ -44,7 +47,8 @@ export async function dispatchAgents(agents, messages, mainModel, fastModel, cal
       }
 
       try {
-        const result = await fn(messages, model, agentType === 'research' ? onScreenshot : undefined);
+        const needsScreenshot = agentType === 'research' || agentType === 'browser';
+        const result = await fn(messages, model, needsScreenshot ? onScreenshot : undefined);
         onAgentComplete?.(label, true, agentType);
         return { agentName: label, result, success: true };
       } catch (err) {
