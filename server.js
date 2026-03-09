@@ -1,1805 +1,214 @@
-﻿/* global process */
+/* global process */
 
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { screenQuery } from './server/agents/screener.js';
+import { classifyQuery } from './server/agents/router.js';
+import { dispatchAgents, AGENT_LABELS } from './server/agents/dispatcher.js';
+import { synthesizeResults } from './server/agents/synthesizer.js';
+import { generate } from './server/llm.js';
 
 dotenv.config();
 
-const app = express();
-
 const {
-  GLM_API_KEY = '',
-  GLM_BASE_URL = '',
-  GLM_MODEL = '',
-  GLM4_API_KEY = '',
-  GLM4_BASE_URL = '',
-  GLM4_MODEL = '',
-  ORCHESTRATOR_MODEL: ORCHESTRATOR_MODEL_ENV = '',
-  GLM_ORCHESTRATOR_MODEL = '',
-  RESPONSE_MODEL: RESPONSE_MODEL_ENV = '',
-  GLM_RESPONSE_MODEL: LEGACY_GLM_RESPONSE_MODEL = '',
-  FOLLOWUP_MODEL: FOLLOWUP_MODEL_ENV = '',
-  GLM_FOLLOWUP_MODEL: LEGACY_GLM_FOLLOWUP_MODEL = '',
-  OPENAI_API_KEY = '',
-  OPENAI_BASE_URL = 'https://api.openai.com/v1',
-  OPENAI_MODEL = 'gpt-5-mini',
-  GEMINI_API_KEY = '',
-  GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta',
-  GEMINI_MODEL = 'gemini-2.5-flash',
   FRONTEND_ORIGIN = '',
   CORS_ALLOWED_ORIGINS = '',
-  TAVILY_API_KEY,
   PORT = 3001,
 } = process.env;
 
+// ── CORS ─────────────────────────────────────────────────────────────────────
 function parseAllowedOrigins(...rawValues) {
   return [...new Set(
     rawValues
-      .flatMap((value) => toStringSafe(value).split(','))
-      .map((origin) => origin.trim())
+      .flatMap((v) => (typeof v === 'string' ? v : '').split(','))
+      .map((o) => o.trim())
       .filter(Boolean),
   )];
 }
 
 const ALLOWED_ORIGINS = parseAllowedOrigins(FRONTEND_ORIGIN, CORS_ALLOWED_ORIGINS);
 const HAS_CORS_ALLOWLIST = ALLOWED_ORIGINS.length > 0;
-const CORS_OPTIONS = {
-  origin(origin, callback) {
-    if (!origin) return callback(null, true);
-    if (!HAS_CORS_ALLOWLIST) return callback(null, true);
-    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
+
+const app = express();
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin || !HAS_CORS_ALLOWLIST || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked: ${origin}`));
   },
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-};
-
-const RESOLVED_GLM_API_KEY = GLM_API_KEY || GLM4_API_KEY || '';
-const RESOLVED_GLM_BASE_URL = GLM_BASE_URL || GLM4_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
-const RESOLVED_GLM_MODEL = GLM_MODEL || GLM4_MODEL || 'glm-5';
-
-const ORCHESTRATOR_MODEL = ORCHESTRATOR_MODEL_ENV || GLM_ORCHESTRATOR_MODEL || 'gemini-2.5-flash-lite';
-const RESPONSE_MODEL = RESPONSE_MODEL_ENV || LEGACY_GLM_RESPONSE_MODEL || RESOLVED_GLM_MODEL;
-const FOLLOWUP_MODEL = FOLLOWUP_MODEL_ENV || LEGACY_GLM_FOLLOWUP_MODEL || 'glm-4.7-flash';
-
-const GLM_RESPONSE_API_KEY = RESOLVED_GLM_API_KEY;
-const GLM_RESPONSE_BASE_URL = RESOLVED_GLM_BASE_URL;
-const GLM_RESPONSE_MODEL = RESOLVED_GLM_MODEL;
-
-app.use(cors(CORS_OPTIONS));
-app.options(/.*/, cors(CORS_OPTIONS));
+}));
+app.options(/.*/, cors());
 app.use(express.json());
 
-function logStartupStatus() {
-  const hasLlmApiKey = Boolean(OPENAI_API_KEY || GEMINI_API_KEY || RESOLVED_GLM_API_KEY);
-  if (!hasLlmApiKey) {
-    console.warn('[startup] No LLM API key found. Set OPENAI_API_KEY, GEMINI_API_KEY, or GLM_API_KEY.');
-  }
-  if (!TAVILY_API_KEY) {
-    console.warn('[startup] TAVILY_API_KEY is missing. Web search features will be skipped.');
-  }
-
-  if (HAS_CORS_ALLOWLIST) {
-    console.log(`[startup] CORS allowlist enabled: ${ALLOWED_ORIGINS.join(', ')}`);
-  } else {
-    console.log('[startup] CORS allowlist disabled: allowing all origins.');
-  }
-}
-
-const SEARCH_PLAN_FALLBACK = {
-  shouldSearch: false,
-  mode: 'none',
-  primaryQueries: [],
-  primaryResultCount: 0,
-  reason: 'Planner fallback: use internal reasoning only.',
-};
-
-const SECOND_SEARCH_FALLBACK = {
-  needsMore: false,
-  refinedQueries: [],
-  additionalResultCount: 0,
-  reason: 'Follow-up search not required.',
-};
-
-const SEARCH_RESULT_LIMITS = {
-  primary: { min: 3, max: 10, defaultSingle: 6, defaultMulti: 6 },
-  followup: { min: 5, max: 10, default: 10 },
-};
-
+// ── SSE helper ───────────────────────────────────────────────────────────────
 function sendSSE(res, type, data) {
   res.write(`data: ${JSON.stringify({ type, data })}\n\n`);
 }
 
-function toStringSafe(value) {
-  return typeof value === 'string' ? value : '';
-}
+// ── Model defaults ───────────────────────────────────────────────────────────
+const DEFAULT_MAIN_MODEL = 'gemini-3-flash-preview';
+const DEFAULT_FAST_MODEL = 'gpt-5-nano';
 
-function sanitizeSearchText(text, maxLen = 420) {
-  const cleaned = toStringSafe(text)
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`[^`]*`/g, ' ')
-    .replace(/\bhttps?:\/\/\S+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/[#*_>|{}[\]]/g, ' ')
-    .trim();
-
-  if (!cleaned) return '';
-  if (cleaned.length <= maxLen) return cleaned;
-  return `${cleaned.slice(0, maxLen - 1)}…`;
-}
-
-function normalizeTextForCompare(text) {
-  return toStringSafe(text)
-    .toLowerCase()
-    .replace(/https?:\/\/\S+/g, ' ')
-    .replace(/[^0-9a-z가-힣\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function toBigrams(text) {
-  const src = normalizeTextForCompare(text).replace(/\s+/g, '');
-  if (!src) return [];
-  if (src.length === 1) return [src];
-  const arr = [];
-  for (let i = 0; i < src.length - 1; i += 1) {
-    arr.push(src.slice(i, i + 2));
-  }
-  return arr;
-}
-
-function diceSimilarity(a, b) {
-  const aa = toBigrams(a);
-  const bb = toBigrams(b);
-  if (!aa.length || !bb.length) return 0;
-
-  const map = new Map();
-  aa.forEach((item) => map.set(item, (map.get(item) || 0) + 1));
-
-  let overlap = 0;
-  bb.forEach((item) => {
-    const cnt = map.get(item) || 0;
-    if (cnt > 0) {
-      overlap += 1;
-      map.set(item, cnt - 1);
-    }
-  });
-
-  return (2 * overlap) / (aa.length + bb.length);
-}
-
-function isNearDuplicateText(text, history = []) {
-  const recent = (history || []).slice(-6);
-  return recent.some((prev) => diceSimilarity(prev, text) >= 0.6);
-}
-
-function toIntSafe(value, fallback) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.trunc(n);
-}
-
-function clampInt(value, min, max) {
-  return Math.max(min, Math.min(max, toIntSafe(value, min)));
-}
-
-function extractFirstJsonObject(text) {
-  const raw = toStringSafe(text).trim();
-  if (!raw) return null;
-
+// ── Follow-up generation ─────────────────────────────────────────────────────
+async function generateFollowUps(answer, userQuery, model) {
   try {
-    return JSON.parse(raw);
-  } catch {
-    // continue
-  }
+    const text = await generate(model, [
+      { role: 'user', content: userQuery },
+      { role: 'assistant', content: answer.slice(0, 1500) },
+      { role: 'user', content: '위 답변을 바탕으로 사용자가 이어서 물어볼 만한 후속 질문 3개를 JSON 배열 형태로만 응답해주세요. 예: ["질문1", "질문2", "질문3"]' },
+    ], { temperature: 0.6, maxTokens: 300 });
 
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (fenced?.[1]) {
-    try {
-      return JSON.parse(fenced[1]);
-    } catch {
-      // continue
+    const match = text.match(/\[[\s\S]*\]/);
+    if (match) {
+      const arr = JSON.parse(match[0]);
+      return arr.filter((q) => typeof q === 'string' && q.trim()).slice(0, 3);
     }
-  }
-
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start !== -1 && end > start) {
-    try {
-      return JSON.parse(raw.slice(start, end + 1));
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
+  } catch { /* skip */ }
+  return [];
 }
 
-function normalizeSearchPlan(plan, _originalQuery) {
-  if (!plan || typeof plan !== 'object') {
-    return {
-      ...SEARCH_PLAN_FALLBACK,
-      reason: 'Planner fallback: invalid planner output, defaulting to no-search.',
-    };
-  }
-
-  const shouldSearch = Boolean(plan.shouldSearch);
-  const validModes = new Set(['none', 'single', 'multi']);
-  let mode = validModes.has(plan.mode) ? plan.mode : shouldSearch ? 'single' : 'none';
-
-  let primaryQueries = Array.isArray(plan.primaryQueries)
-    ? plan.primaryQueries
-        .map((q) => toStringSafe(q).trim())
-        .filter(Boolean)
-    : [];
-
-  primaryQueries = [...new Set(primaryQueries)];
-  const safeQuery = keywordizeQueryText(_originalQuery);
-
-  if (shouldSearch && primaryQueries.length === 0 && safeQuery) {
-    primaryQueries = [safeQuery];
-  }
-
-  if (!shouldSearch) {
-    mode = 'none';
-    primaryQueries = [];
-  }
-
-  if (mode !== 'multi') {
-    primaryQueries = primaryQueries.slice(0, 1);
-    if (shouldSearch && primaryQueries.length > 0) mode = 'single';
-  } else {
-    primaryQueries = primaryQueries.slice(0, 3);
-    if (primaryQueries.length <= 1) mode = 'single';
-  }
-
-  const defaultPrimaryCount =
-    mode === 'multi'
-      ? SEARCH_RESULT_LIMITS.primary.defaultMulti
-      : SEARCH_RESULT_LIMITS.primary.defaultSingle;
-
-  const primaryResultCount = shouldSearch
-    ? clampInt(
-        plan.primaryResultCount ?? plan.primaryMaxResults ?? plan.resultCount ?? defaultPrimaryCount,
-        SEARCH_RESULT_LIMITS.primary.min,
-        SEARCH_RESULT_LIMITS.primary.max,
-      )
-    : 0;
-
-  return {
-    shouldSearch,
-    mode,
-    primaryQueries,
-    primaryResultCount,
-    reason: toStringSafe(plan.reason) || SEARCH_PLAN_FALLBACK.reason,
-  };
-}
-
-function normalizeSecondSearchDecision(decision) {
-  if (!decision || typeof decision !== 'object') return SECOND_SEARCH_FALLBACK;
-
-  const refinedQueries = Array.isArray(decision.refinedQueries)
-    ? decision.refinedQueries
-        .map((q) => toStringSafe(q).trim())
-        .filter(Boolean)
-    : toStringSafe(decision.refinedQuery)
-      ? [toStringSafe(decision.refinedQuery).trim()]
-      : [];
-
-  const uniqueQueries = [...new Set(refinedQueries)].slice(0, 2);
-  const needsMore = Boolean(decision.needsMore) && uniqueQueries.length > 0;
-  const additionalResultCount = needsMore
-    ? clampInt(
-        decision.additionalResultCount ??
-          decision.additionalMaxResults ??
-          decision.maxResults ??
-          decision.resultCount ??
-          SEARCH_RESULT_LIMITS.followup.default,
-        SEARCH_RESULT_LIMITS.followup.min,
-        SEARCH_RESULT_LIMITS.followup.max,
-      )
-    : 0;
-
-  return {
-    needsMore,
-    refinedQueries: needsMore ? uniqueQueries : [],
-    additionalResultCount,
-    reason: toStringSafe(decision.reason) || SECOND_SEARCH_FALLBACK.reason,
-  };
-}
-
-function normalizeQueryArray(rawQueries, maxQueries = 3) {
-  return [...new Set((rawQueries || []).map((q) => toStringSafe(q).trim()).filter(Boolean))].slice(
-    0,
-    maxQueries,
-  );
-}
-
-const KOREAN_REQUEST_ENDINGS =
-  /(알려줘|알려주세요|찾아줘|검색해줘|정리해줘|요약해줘|설명해줘|만들어줘|추천해줘|해줘|해주세요|해줄래|부탁해)$/i;
-const EN_REQUEST_PHRASES =
-  /\b(please|tell me|show me|help me|can you|could you|how to|what is|explain)\b/i;
-const REQUEST_TOKEN_PATTERNS = [
-  /알려|검색|찾아|정리|요약|설명|만들|추천|가르쳐|작성|작성해|해줘|해주세요|부탁/i,
-  /how|what|why|please|show|tell|explain|guide/i,
-];
-const QUERY_STOPWORD_TOKENS = new Set([
-  '관련',
-  '관련한',
-  '관련해서',
-  '관한',
-  '대한',
-  '대해',
-  '방법',
-  '위한',
-  '위해',
-  '도입과',
-  '도입',
-]);
-
-function normalizeKeywordToken(token) {
-  let next = toStringSafe(token)
-    .replace(/^[^0-9A-Za-z가-힣]+|[^0-9A-Za-z가-힣]+$/g, '')
-    .trim();
-  if (!next) return '';
-
-  // strip common Korean particles to make keyword-style phrases
-  next = next.replace(
-    /(으로|로|에서|에게|한테|부터|까지|보다|처럼|만큼|라도|이나|나|와|과|의|도|만|은|는|이|가|을|를)$/u,
-    '',
-  );
-  return next.trim();
-}
-
-function compactKeywordQuery(text, maxTokens = 7) {
-  const tokens = toStringSafe(text)
-    .replace(/[\n\r]+/g, ' ')
-    .replace(/[“”"'`]/g, '')
-    .split(/\s+/)
-    .map((token) => normalizeKeywordToken(token))
-    .filter(Boolean)
-    .filter((token) => token.length > 1)
-    .filter((token) => !QUERY_STOPWORD_TOKENS.has(token))
-    .filter((token) => !REQUEST_TOKEN_PATTERNS.some((pattern) => pattern.test(token)));
-
-  if (!tokens.length) return '';
-
-  const dedup = [];
-  const seen = new Set();
-  tokens.forEach((token) => {
-    const key = token.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    dedup.push(token);
-  });
-
-  return dedup.slice(0, maxTokens).join(' ').slice(0, 90).trim();
-}
-
-function keywordizeQueryText(text) {
-  let q = toStringSafe(text)
-    .replace(/[“”"'`]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  q = q.replace(/[?.!]+$/g, '').trim();
-  q = q
-    .replace(/\b(please|tell me|show me|help me|can you|could you)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  const tailPatterns = [
-    /(알려줘|알려주세요|찾아줘|검색해줘|정리해줘|요약해줘|설명해줘|만들어줘|추천해줘|해줘|해주세요)$/i,
-    /(해줄래|해줄 수 있어|부탁해)$/i,
-  ];
-  tailPatterns.forEach((pattern) => {
-    q = q.replace(pattern, '').trim();
-  });
-
-  q = q.replace(/\s+/g, ' ').trim();
-  if (!q) return '';
-
-  // Prefer compact keyword-style query if the phrase still looks like a sentence.
-  if (isSentenceLikeSearchQuery(q) || q.split(/\s+/).filter(Boolean).length > 7) {
-    const compact = compactKeywordQuery(q, 7);
-    if (compact) q = compact;
-  }
-
-  return q.slice(0, 90).trim();
-}
-
-function isQueryTooSimilarToUser(query, userQuery) {
-  const q = toStringSafe(query).trim();
-  const u = toStringSafe(userQuery).trim();
-  if (!q || !u) return false;
-
-  if (normalizeForCompare(q) === normalizeForCompare(u)) return true;
-  return diceSimilarity(q, u) >= 0.84;
-}
-
-function isSentenceLikeSearchQuery(query) {
-  const q = toStringSafe(query).trim();
-  if (!q) return false;
-
-  if (KOREAN_REQUEST_ENDINGS.test(q)) return true;
-  if (EN_REQUEST_PHRASES.test(q)) return true;
-
-  const tokenCount = q.split(/\s+/).filter(Boolean).length;
-  return tokenCount >= 9;
-}
-
-function hardenSearchQuery(query, userQuery, mode = 'primary') {
-  let next = keywordizeQueryText(query) || keywordizeQueryText(userQuery) || toStringSafe(query).trim();
-  if (!next) return '';
-
-  if (isQueryTooSimilarToUser(next, userQuery) || isSentenceLikeSearchQuery(next)) {
-    const suffix = mode === 'followup' ? ' 심화 정보' : ' 핵심 정리';
-    if (isQueryTooSimilarToUser(next, userQuery)) {
-      next = `${next} ${suffix}`.trim();
-    }
-    next = keywordizeQueryText(next) || next;
-  }
-
-  if (isQueryTooSimilarToUser(next, userQuery)) {
-    const suffix = mode === 'followup' ? ' 추가 근거' : ' 최신 자료';
-    next = `${next} ${suffix}`.trim();
-  }
-
-  if (isSentenceLikeSearchQuery(next) || next.split(/\s+/).filter(Boolean).length > 7) {
-    const compact = compactKeywordQuery(next, mode === 'followup' ? 8 : 7);
-    if (compact) next = compact;
-  }
-
-  if (isQueryTooSimilarToUser(next, userQuery)) {
-    const compactUser = compactKeywordQuery(userQuery, mode === 'followup' ? 8 : 7);
-    if (compactUser) {
-      next = `${compactUser} ${mode === 'followup' ? '심화 정보' : '핵심 정리'}`.trim();
-    } else {
-      next = `${next} ${mode === 'followup' ? '심화 정보' : '핵심 정리'}`.trim();
-    }
-  }
-
-  return next.slice(0, 90).trim();
-}
-
-function enforceOptimizedQueryQuality(queries, userQuery, mode, maxQueries) {
-  const source = normalizeQueryArray(queries, maxQueries);
-  const adjusted = source
-    .map((query) => hardenSearchQuery(query, userQuery, mode))
-    .filter(Boolean);
-  return normalizeQueryArray(adjusted, maxQueries);
-}
-
-function normalizeForCompare(text) {
-  return toStringSafe(text)
-    .toLowerCase()
-    .replace(/[?.!,]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function buildFollowUpFallback(userQuery) {
-  const raw = toStringSafe(userQuery).replace(/\s+/g, ' ').trim().replace(/[?.!]+$/g, '');
-  const topic = (raw || '이 주제').slice(0, 36);
-  return [
-    `${topic}를 단계별 실행 체크리스트로 정리해줘.`,
-    `${topic}에서 우선순위 높은 작업 5가지만 뽑아줘.`,
-    `${topic} 진행 중 자주 막히는 지점과 해결법 알려줘.`,
-  ];
-}
-
-function normalizeFollowUpQuestions(rawQuestions, userQuery) {
-  const userNorm = normalizeForCompare(userQuery);
-  const seen = new Set();
-  const out = [];
-
-  (Array.isArray(rawQuestions) ? rawQuestions : [])
-    .map((item) => toStringSafe(item).replace(/\s+/g, ' ').trim())
-    .forEach((q) => {
-      if (!q) return;
-      const normalized = normalizeForCompare(q);
-      if (!normalized || normalized === userNorm || seen.has(normalized)) return;
-      seen.add(normalized);
-      out.push(q);
-    });
-
-  return out.slice(0, 3);
-}
-
-function requiresFreshNewsSearch(userQuery) {
-  const query = toStringSafe(userQuery).trim();
-  if (!query) return false;
-
-  const freshnessHint = /(최신|최근|오늘|실시간|현직|현재|latest|recent|today|current|real[-\s]?time)/i;
-  const sourceHint = /(뉴스|기사|보도|신문|속보|언론|발표|news|article|report|press)/i;
-
-  return freshnessHint.test(query) || sourceHint.test(query);
-}
-
-function areFollowUpsTemplateLike(questions, userQuery) {
-  if (!Array.isArray(questions) || questions.length < 3) return true;
-
-  const fallbackNorm = new Set(
-    buildFollowUpFallback(userQuery).map((item) => normalizeForCompare(item)),
-  );
-  const normalized = questions.map((item) => normalizeForCompare(item));
-
-  let fallbackMatches = 0;
-  normalized.forEach((item) => {
-    if (fallbackNorm.has(item)) fallbackMatches += 1;
-  });
-
-  // treat as template when most outputs match fallback or share highly repetitive endings
-  if (fallbackMatches >= 2) return true;
-  const repetitive = normalized.filter(
-    (item) =>
-      item.includes('단계별 실행 체크리스트') ||
-      item.includes('우선순위 높은 작업 5가지만') ||
-      item.includes('자주 막히는 지점과 해결법'),
-  ).length;
-
-  return repetitive >= 2;
-}
-
-async function callGlmJson(
-  messages,
-  {
-    model = ORCHESTRATOR_MODEL,
-    timeoutMs = 9000,
-    maxTokens = 220,
-    temperature = 0.2,
-    disableThinking = false,
-  } = {},
-) {
-  const raw = await callGlmText(messages, {
-    model,
-    timeoutMs,
-    maxTokens,
-    temperature,
-    disableThinking,
-  });
-  return extractFirstJsonObject(raw);
-}
-
-async function callGlmText(
-  messages,
-  {
-    model = ORCHESTRATOR_MODEL,
-    timeoutMs = 7000,
-    maxTokens = 120,
-    temperature = 0.3,
-    disableThinking = false,
-  } = {},
-) {
-  const resolvedModel = toStringSafe(model).trim() || ORCHESTRATOR_MODEL;
-  const provider = detectModelProvider(resolvedModel);
-
-  if (provider === 'gemini') {
-    const generationConfig = {};
-    if (Number.isFinite(maxTokens) && maxTokens > 0) {
-      generationConfig.maxOutputTokens = maxTokens;
-    }
-    if (typeof temperature === 'number') {
-      generationConfig.temperature = temperature;
-    }
-    return chatWithGeminiText({
-      baseUrl: GEMINI_BASE_URL,
-      apiKey: GEMINI_API_KEY,
-      model: resolvedModel || GEMINI_MODEL,
-      messages,
-      generationConfig: Object.keys(generationConfig).length ? generationConfig : undefined,
-    });
-  }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    if (provider === 'openai') {
-      const res = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: resolvedModel || OPENAI_MODEL,
-          messages,
-          stream: false,
-          max_tokens: maxTokens,
-          temperature,
-        }),
-        signal: controller.signal,
-      });
-
-      if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`OpenAI API error: ${res.status} - ${body}`);
-      }
-
-      const payload = await res.json();
-      const message = payload.choices?.[0]?.message || {};
-      const content = message.content;
-      if (typeof content === 'string' && content.trim()) {
-        return content.trim();
-      }
-      if (Array.isArray(content)) {
-        const joined = content
-          .map((part) => toStringSafe(part?.text || part))
-          .join('')
-          .trim();
-        if (joined) return joined;
-      }
-      return toStringSafe(message.reasoning_content).trim();
-    }
-
-    const res = await fetch(`${RESOLVED_GLM_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${RESOLVED_GLM_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: resolvedModel || RESOLVED_GLM_MODEL,
-        messages,
-        stream: false,
-        max_tokens: maxTokens,
-        temperature,
-        ...(disableThinking ? { thinking: { type: 'disabled' } } : {}),
-      }),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`GLM4 API error: ${res.status} - ${body}`);
-    }
-
-    const payload = await res.json();
-    const message = payload.choices?.[0]?.message || {};
-    const content = toStringSafe(message.content).trim();
-    if (content) return content;
-    return toStringSafe(message.reasoning_content).trim();
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function normalizeBaseUrl(url) {
-  return toStringSafe(url).replace(/\/+$/, '');
-}
-
-function detectModelProvider(modelName) {
-  const model = toStringSafe(modelName).trim().toLowerCase();
-  if (!model) return 'glm';
-  if (model.startsWith('gemini')) return 'gemini';
-  if (model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3')) return 'openai';
-  if (model.startsWith('glm-')) return 'glm';
-  return 'glm';
-}
-
-function hasModelProviderKey(modelName) {
-  const provider = detectModelProvider(modelName);
-  if (provider === 'gemini') return Boolean(toStringSafe(GEMINI_API_KEY).trim());
-  if (provider === 'openai') return Boolean(toStringSafe(OPENAI_API_KEY).trim());
-  return Boolean(toStringSafe(RESOLVED_GLM_API_KEY).trim());
-}
-
-function resolveRequestedResponseModel(requestedModel) {
-  const chosen = toStringSafe(requestedModel).trim();
-  if (chosen) return chosen;
-  return RESPONSE_MODEL || GLM_RESPONSE_MODEL || OPENAI_MODEL || GEMINI_MODEL;
-}
-
-function mapMessagesToGeminiPayload(messages) {
-  const systemText = (messages || [])
-    .filter((m) => m?.role === 'system')
-    .map((m) => toStringSafe(m.content).trim())
-    .filter(Boolean)
-    .join('\n\n')
-    .trim();
-
-  const contents = (messages || [])
-    .filter((m) => m?.role === 'user' || m?.role === 'assistant')
-    .map((m) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: toStringSafe(m.content) }],
-    }));
-
-  const payload = {
-    contents: contents.length > 0 ? contents : [{ role: 'user', parts: [{ text: '' }] }],
-  };
-
-  if (systemText) {
-    payload.system_instruction = {
-      parts: [{ text: systemText }],
-    };
-  }
-
-  return payload;
-}
-
-async function chatWithOpenAICompatStream({ baseUrl, apiKey, model, messages }) {
-  if (!toStringSafe(apiKey).trim()) {
-    throw new Error(`API key is missing for model: ${model}`);
-  }
-
-  const endpoint = `${normalizeBaseUrl(baseUrl)}/chat/completions`;
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: true,
-    }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Model API error (${model}): ${response.status} - ${errText}`);
-  }
-
-  return response;
-}
-
-async function chatWithGeminiText({ baseUrl, apiKey, model, messages, generationConfig }) {
-  if (!toStringSafe(apiKey).trim()) {
-    throw new Error(`Gemini API key is missing for model: ${model}`);
-  }
-
-  const payload = mapMessagesToGeminiPayload(messages);
-  if (generationConfig && typeof generationConfig === 'object') {
-    payload.generationConfig = generationConfig;
-  }
-  const endpoint = `${normalizeBaseUrl(baseUrl)}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gemini API error (${model}): ${response.status} - ${errText}`);
-  }
-
-  const data = await response.json();
-  const text = (data.candidates?.[0]?.content?.parts || [])
-    .map((part) => toStringSafe(part?.text))
-    .join('')
-    .trim();
-
-  if (!text) {
-    throw new Error(`Gemini response is empty for model: ${model}`);
-  }
-
-  return text;
-}
-
-async function relayOpenAICompatStreamToClient(response, res) {
-  const reader = response.body?.getReader?.();
-  if (!reader) {
-    throw new Error('Model stream is not readable.');
-  }
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let generatedAnswerText = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.startsWith('data:')) continue;
-
-      const data = trimmed.slice(5).trim();
-      if (data === '[DONE]') continue;
-
-      try {
-        const parsed = JSON.parse(data);
-        const content = parsed.choices?.[0]?.delta?.content;
-        if (content) {
-          generatedAnswerText += content;
-          sendSSE(res, 'content', content);
-        }
-      } catch {
-        // ignore malformed stream line
-      }
-    }
-  }
-
-  return generatedAnswerText;
-}
-
-async function generateResponseWithSelectedModel({ model, messages, res }) {
-  const resolvedModel = resolveRequestedResponseModel(model);
-  const provider = detectModelProvider(resolvedModel);
-
-  if (provider === 'gemini') {
-    const text = await chatWithGeminiText({
-      baseUrl: GEMINI_BASE_URL,
-      apiKey: GEMINI_API_KEY,
-      model: resolvedModel || GEMINI_MODEL,
-      messages,
-    });
-    sendSSE(res, 'content', text);
-    return text;
-  }
-
-  if (provider === 'openai') {
-    const stream = await chatWithOpenAICompatStream({
-      baseUrl: OPENAI_BASE_URL,
-      apiKey: OPENAI_API_KEY,
-      model: resolvedModel || OPENAI_MODEL,
-      messages,
-    });
-    return relayOpenAICompatStreamToClient(stream, res);
-  }
-
-  const stream = await chatWithOpenAICompatStream({
-    baseUrl: GLM_RESPONSE_BASE_URL,
-    apiKey: GLM_RESPONSE_API_KEY,
-    model: resolvedModel || GLM_RESPONSE_MODEL,
-    messages,
-  });
-  return relayOpenAICompatStreamToClient(stream, res);
-}
-
-function buildThinkingFallback(stage, context = {}) {
-  switch (stage) {
-    case 'analyze_intent':
-      return '질문의 핵심 의도를 먼저 정리하고 있습니다.';
-    case 'decide_search':
-      if (context.searchPlan?.shouldSearch) {
-        return '정확한 답변을 위해 최신 정보를 확인할 웹검색이 필요하다고 판단했습니다.';
-      }
-      return '웹검색 없이도 답변 가능한 요청으로 판단했습니다.';
-    case 'plan_queries':
-      if (context.searchPlan?.shouldSearch) {
-        return '검색에 사용할 쿼리와 확인 순서를 정리하고 있습니다.';
-      }
-      return '검색 단계는 건너뛰고 답변 준비로 바로 넘어갑니다.';
-    case 'searching':
-      return '신뢰 가능한 근거를 확보하기 위해 웹검색을 실행하고 있습니다.';
-    case 'search_results':
-      return `웹검색 결과에서 출처 ${context.sourceCount || 0}개를 확보했고 ${toStringSafe(context.domainsText) || '핵심 도메인'}를 우선 검토하겠습니다.`;
-    case 'analyzing':
-      return '검색 결과를 검토해 누락 정보와 신뢰도를 확인하고 있습니다.';
-    case 'searching_2':
-      return '누락 정보를 보강하기 위해 추가 웹검색을 실행하고 있습니다.';
-    case 'synthesize':
-      return '검색 결과를 바탕으로 답변을 정리하고 있습니다.';
-    case 'thinking':
-      return '답변 초안을 마무리하고 곧 전달하겠습니다.';
-    case 'error':
-      return `진행 중 오류가 발생했습니다: ${toStringSafe(context.error) || '알 수 없는 오류'}`;
-    default:
-      return '응답 준비를 진행하고 있습니다.';
-  }
-}
-
-async function generateThinkingNarration({ stage, userQuery, context = {} }) {
-  const fallback = buildThinkingFallback(stage, context);
-  if (!hasModelProviderKey(ORCHESTRATOR_MODEL)) return fallback;
-
-  const lines = [
-    `stage: ${stage}`,
-    `user_query: ${toStringSafe(userQuery).slice(0, 240)}`,
-  ];
-
-  if (context.searchPlan) {
-    lines.push(`search_should: ${Boolean(context.searchPlan.shouldSearch)}`);
-    lines.push(`search_mode: ${toStringSafe(context.searchPlan.mode)}`);
-    lines.push(`primary_result_count: ${toIntSafe(context.searchPlan.primaryResultCount, 0)}`);
-    lines.push(`search_reason: ${toStringSafe(context.searchPlan.reason).slice(0, 200)}`);
-    lines.push(`primary_queries: ${(context.searchPlan.primaryQueries || []).join(' | ').slice(0, 240)}`);
-  }
-
-  if (context.secondDecision) {
-    lines.push(`needs_more: ${Boolean(context.secondDecision.needsMore)}`);
-    lines.push(`additional_result_count: ${toIntSafe(context.secondDecision.additionalResultCount, 0)}`);
-    lines.push(`decision_reason: ${toStringSafe(context.secondDecision.reason).slice(0, 200)}`);
-  }
-
-  if (typeof context.sourceCount === 'number') {
-    lines.push(`source_count: ${context.sourceCount}`);
-  }
-  if (typeof context.maxResults === 'number') {
-    lines.push(`max_results_per_query: ${context.maxResults}`);
-  }
-  if (context.domainsText) {
-    lines.push(`top_domains: ${context.domainsText}`);
-  }
-  if (Array.isArray(context.previousLines) && context.previousLines.length > 0) {
-    lines.push(`previous_lines: ${context.previousLines.slice(-4).join(' || ')}`);
-  }
-
-  if (context.round) {
-    lines.push(`round: ${context.round}`);
-  }
-
-  if (context.error) {
-    lines.push(`error: ${toStringSafe(context.error).slice(0, 200)}`);
-  }
-
-  const messages = [
-    {
-      role: 'system',
-      content: [
-        'You are an orchestration narrator for a "Thinking" panel.',
-        'Return exactly one Korean sentence.',
-        'Keep it concise and natural, no bullet, no quotes, no markdown.',
-        'Length target: about 28~55 Korean characters.',
-        'Describe current 판단 and next action.',
-        'Include at least one concrete detail from the context (query term, source count, max_results, or domain).',
-        'Avoid repeating the same generic sentence across stages.',
-        'Do not restate the same meaning as previous_lines.',
-        'Do not invent numbers, domains, or facts that are not present in context.',
-        'If a value is missing, avoid specific numeric claims.',
-      ].join('\n'),
-    },
-    {
-      role: 'user',
-      content: lines.join('\n'),
-    },
-  ];
-
-  try {
-    const raw = await callGlmText(messages, {
-      model: ORCHESTRATOR_MODEL,
-      maxTokens: 90,
-      timeoutMs: 7000,
-      temperature: 0.25,
-      disableThinking: true,
-    });
-    const normalized = toStringSafe(raw)
-      .replace(/```[\s\S]*?```/g, '')
-      .split('\n')
-      .map((line) => line.trim())
-      .find(Boolean);
-
-    return normalized || fallback;
-  } catch (err) {
-    console.error('Thinking narration error:', err.message);
-    return fallback;
-  }
-}
-
-async function emitThinking(res, { stage, stageKey, userQuery, context, history, emittedKeys }) {
-  const key = toStringSafe(stageKey) || toStringSafe(stage);
-  if (key && emittedKeys instanceof Set && emittedKeys.has(key)) return;
-
-  const text = await generateThinkingNarration({
-    stage,
-    userQuery,
-    context: {
-      ...context,
-      previousLines: history || [],
-    },
-  });
-  if (!text) return;
-  if (isNearDuplicateText(text, history)) return;
-
-  if (Array.isArray(history)) {
-    history.push(text);
-    if (history.length > 12) history.shift();
-  }
-
-  if (key && emittedKeys instanceof Set) {
-    emittedKeys.add(key);
-  }
-
-  sendSSE(res, 'thinking_text', text);
-}
-
-async function searchWeb(query, maxResults = SEARCH_RESULT_LIMITS.followup.default) {
-  const resolvedMaxResults = clampInt(
-    maxResults,
-    SEARCH_RESULT_LIMITS.primary.min,
-    SEARCH_RESULT_LIMITS.followup.max,
-  );
-
-  const res = await fetch('https://api.tavily.com/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      api_key: TAVILY_API_KEY,
-      query,
-      max_results: resolvedMaxResults,
-      include_answer: true,
-      include_raw_content: true,
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error(`Tavily API error: ${res.status}`);
-  }
-
-  const data = await res.json();
-  return {
-    answer: toStringSafe(data.answer),
-    results: (data.results || []).map((r) => ({
-      title: toStringSafe(r.title),
-      url: toStringSafe(r.url),
-      content: sanitizeSearchText(r.content || r.raw_content),
-    })),
-  };
-}
-
-async function buildInitialSearchPlan(userQuery, conversationMessages) {
-  const modelFallbackPlan = normalizeSearchPlan(SEARCH_PLAN_FALLBACK, userQuery);
-  const shouldForceSearch = requiresFreshNewsSearch(userQuery);
-  const forcedQuery =
-    hardenSearchQuery(userQuery, userQuery, 'primary') ||
-    keywordizeQueryText(userQuery) ||
-    toStringSafe(userQuery).trim();
-  const forcedSearchPlan = normalizeSearchPlan(
-    {
-      shouldSearch: true,
-      mode: 'single',
-      primaryQueries: forcedQuery ? [forcedQuery] : [],
-      primaryResultCount: SEARCH_RESULT_LIMITS.primary.defaultSingle,
-      reason: 'Policy override: freshness/news style request requires search.',
-    },
-    userQuery,
-  );
-
-  if (!hasModelProviderKey(ORCHESTRATOR_MODEL)) {
-    return shouldForceSearch ? forcedSearchPlan : modelFallbackPlan;
-  }
-
-  const briefHistory = (conversationMessages || [])
-    .slice(-6)
-    .map((m) => `${m.role}: ${toStringSafe(m.content).slice(0, 300)}`)
-    .join('\n');
-
-  const plannerMessages = [
-    {
-      role: 'system',
-      content:
-        'You are a search-orchestration planner. Decide if web retrieval is required before answering. Return JSON only.',
-    },
-    {
-      role: 'user',
-      content: [
-        'Decide web search strategy for this request.',
-        '',
-        `User query: "${userQuery}"`,
-        '',
-        'Recent conversation (may be empty):',
-        briefHistory || '(none)',
-        '',
-        'Rules:',
-        '- shouldSearch=true when freshness, external facts, citation-grade grounding, or URL/source verification is needed.',
-        '- shouldSearch=false for pure reasoning, writing, translation, coding from provided context, or subjective advice.',
-        '- mode=single for one coherent lookup question.',
-        '- mode=multi for clearly distinct subtopics requiring separate lookups.',
-        '- primaryQueries should be 0 items if mode=none, 1 item for single, up to 3 items for multi.',
-        '- primaryResultCount is per-query max_results for first-round retrieval.',
-        '- primaryResultCount must be chosen by difficulty/uncertainty, not fixed.',
-        '- Simple lookup usually 4~8, broader or fast-changing topics can be up to 10.',
-        '',
-        'Return JSON schema exactly:',
-        '{"shouldSearch": boolean, "mode": "none"|"single"|"multi", "primaryQueries": string[], "primaryResultCount": number, "reason": string}',
-      ].join('\n'),
-    },
-  ];
-
-  try {
-    const plan = await callGlmJson(plannerMessages, {
-      model: ORCHESTRATOR_MODEL,
-      maxTokens: 260,
-      timeoutMs: 9000,
-      disableThinking: true,
-    });
-    const normalized = normalizeSearchPlan(plan, userQuery);
-    if (shouldForceSearch && !normalized.shouldSearch) {
-      return forcedSearchPlan;
-    }
-    return normalized;
-  } catch (err) {
-    console.error('Search planner error:', err.message);
-    return shouldForceSearch ? forcedSearchPlan : modelFallbackPlan;
-  }
-}
-
-async function optimizeSearchQueries({ userQuery, queries, mode = 'primary', maxQueries = 3 }) {
-  const fallback = normalizeQueryArray(queries, maxQueries);
-  const qualityFallback = enforceOptimizedQueryQuality(fallback, userQuery, mode, maxQueries);
-  if (!fallback.length || !hasModelProviderKey(ORCHESTRATOR_MODEL)) return qualityFallback;
-
-  const messages = [
-    {
-      role: 'system',
-      content: [
-        'You rewrite user search queries for web retrieval quality.',
-        'Return JSON only.',
-        'Keep entity names, version numbers, and constraints.',
-        'Use concise keyword-style phrases, not long sentences.',
-      ].join('\n'),
-    },
-    {
-      role: 'user',
-      content: [
-        `User query: "${toStringSafe(userQuery).slice(0, 240)}"`,
-        `Round mode: ${mode}`,
-        `Max queries: ${maxQueries}`,
-        `Candidate queries: ${fallback.join(' | ')}`,
-        '',
-        'Rules:',
-        '- Keep same intent; improve precision and retrieval effectiveness.',
-        '- Add key qualifiers only when they help (official docs, install, setup, latest version, etc.).',
-        '- For Korean, rewrite polite request sentences into concise keyword-style search phrases.',
-        '- Prefer core terms and constraints over full natural-language sentences.',
-        '- NEVER copy the user sentence verbatim.',
-        '- Remove request endings such as "알려줘/설명해줘/만들어줘/how to/please".',
-        '- Prefer 2~7 keyword tokens when possible.',
-        '- Each query must be <= 90 chars.',
-        '- Queries must be keyword-style; avoid polite request endings.',
-        '- Do not return exactly the same sentence as user query.',
-        '- Do not output markdown or explanation.',
-        '',
-        'Examples:',
-        '- "파이썬 코드 구구단게임 만들어줘" -> "파이썬 구구단 게임 코드 예제"',
-        '- "OpenClaw를 커스터마이징하는 방법 알려줘" -> "OpenClaw 커스터마이징 가이드 설정 방법"',
-        '',
-        'Return JSON schema exactly:',
-        '{"queries": string[]}',
-      ].join('\n'),
-    },
-  ];
-
-  try {
-    const rewritten = await callGlmJson(messages, {
-      model: ORCHESTRATOR_MODEL,
-      maxTokens: 220,
-      timeoutMs: 8000,
-      disableThinking: true,
-    });
-
-    const optimized = enforceOptimizedQueryQuality(rewritten?.queries, userQuery, mode, maxQueries);
-    const hardened = enforceOptimizedQueryQuality(optimized, userQuery, mode, maxQueries);
-
-    const finalQueries = normalizeQueryArray(
-      hardened.map((q) => hardenSearchQuery(q, userQuery, mode)).filter(Boolean),
-      maxQueries,
-    );
-    if (finalQueries.length > 0) return finalQueries;
-
-    return hardened.length > 0 ? hardened : qualityFallback;
-  } catch (err) {
-    console.error('Search query optimizer error:', err.message);
-    return qualityFallback;
-  }
-}
-
-async function generateInitialTodoIntro({ userQuery, searchPlan }) {
-  if (!hasModelProviderKey(ORCHESTRATOR_MODEL)) return '';
-
-  const messages = [
-    {
-      role: 'system',
-      content: [
-        'You write the first Thinking-panel message in Korean for teachers.',
-        'Output exactly 5~6 lines, plain text only.',
-        'Line 1: paraphrase the user request naturally (do not copy verbatim).',
-        'Line 2: short lead-in sentence for execution plan.',
-        'Line 3~5: TODO bullets, each starts with "- ".',
-        'Last line: immediate next action.',
-        'No markdown headings, no code block, no quotation marks.',
-      ].join('\n'),
-    },
-    {
-      role: 'user',
-      content: [
-        `user_query: ${toStringSafe(userQuery).slice(0, 280)}`,
-        `should_search: ${Boolean(searchPlan?.shouldSearch)}`,
-        `search_mode: ${toStringSafe(searchPlan?.mode) || 'none'}`,
-        `optimized_queries: ${(searchPlan?.primaryQueries || []).join(' | ').slice(0, 220)}`,
-        '',
-        'If should_search=true, the last line must mention starting web search first.',
-        'If should_search=false, the last line must mention proceeding without search.',
-      ].join('\n'),
-    },
-  ];
-
-  try {
-    const raw = await callGlmText(messages, {
-      model: ORCHESTRATOR_MODEL,
-      maxTokens: 220,
-      timeoutMs: 8000,
-      temperature: 0.25,
-      disableThinking: true,
-    });
-    const normalized = toStringSafe(raw)
-      .replace(/```[\s\S]*?```/g, '')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .slice(0, 7)
-      .join('\n');
-
-    if (!normalized) return '';
-    return normalized;
-  } catch (err) {
-    console.error('Initial todo intro generation error:', err.message);
-    return '';
-  }
-}
-
-async function generateFollowUpQuestions({ userQuery, answerText }) {
-  const fallback = buildFollowUpFallback(userQuery);
-  if (!hasModelProviderKey(FOLLOWUP_MODEL)) return fallback;
-
-  const trimmedAnswer = toStringSafe(answerText).replace(/\s+/g, ' ').trim().slice(0, 900);
-  const messages = [
-    {
-      role: 'system',
-      content: [
-        'You generate exactly 3 high-quality Korean follow-up questions.',
-        'Return JSON only.',
-        'Questions must be actionable and non-duplicative.',
-        'Do not repeat the user query wording.',
-      ].join('\n'),
-    },
-    {
-      role: 'user',
-      content: [
-        `User query: "${toStringSafe(userQuery).slice(0, 240)}"`,
-        `Assistant answer summary: "${trimmedAnswer || '(empty)'}"`,
-        '',
-        'Rules:',
-        '- Output 3 concise Korean questions.',
-        '- Avoid asking exactly same as the original user query.',
-        '- Each question should be one sentence, <= 60 chars if possible.',
-        '- No numbering, no markdown.',
-        '',
-        'Return JSON schema exactly:',
-        '{"questions": string[]}',
-      ].join('\n'),
-    },
-  ];
-
-  try {
-    const parsed = await callGlmJson(messages, {
-      model: FOLLOWUP_MODEL,
-      maxTokens: 220,
-      timeoutMs: 9000,
-      temperature: 0.35,
-      disableThinking: true,
-    });
-
-    const normalized = normalizeFollowUpQuestions(parsed?.questions, userQuery);
-    if (normalized.length >= 3 && !areFollowUpsTemplateLike(normalized, userQuery)) {
-      return normalized;
-    }
-  } catch (err) {
-    console.error('Follow-up generation error:', err.message);
-  }
-
-  // Retry with plain-text output in case JSON parsing is unstable.
-  try {
-    const retryMessages = [
-      {
-        role: 'system',
-        content: [
-          '한국어 후속 질문 3개를 생성하세요.',
-          '각 줄에 질문 1개씩, 총 3줄만 출력하세요.',
-          '번호/불릿/마크다운/설명 없이 질문 문장만 출력하세요.',
-          '사용자 원문을 그대로 반복하지 마세요.',
-        ].join('\n'),
-      },
-      {
-        role: 'user',
-        content: [
-          `사용자 질문: ${toStringSafe(userQuery).slice(0, 240)}`,
-          `답변 요약: ${trimmedAnswer || '(empty)'}`,
-          '조건: 실행 가능한 후속 질문, 서로 중복 금지.',
-        ].join('\n'),
-      },
-    ];
-
-    const raw = await callGlmText(retryMessages, {
-      model: FOLLOWUP_MODEL,
-      maxTokens: 220,
-      timeoutMs: 9000,
-      temperature: 0.35,
-      disableThinking: true,
-    });
-
-    const fromText = toStringSafe(raw)
-      .replace(/```[\s\S]*?```/g, '')
-      .split('\n')
-      .map((line) => line.replace(/^[-\d.)\s]+/, '').trim())
-      .filter(Boolean);
-
-    const normalizedRetry = normalizeFollowUpQuestions(fromText, userQuery);
-    if (normalizedRetry.length >= 3 && !areFollowUpsTemplateLike(normalizedRetry, userQuery)) {
-      return normalizedRetry;
-    }
-  } catch (err) {
-    console.error('Follow-up generation retry error:', err.message);
-  }
-
-  return fallback;
-}
-
-async function shouldDoSecondSearch(userQuery, searchPlan, firstRoundEntries) {
-  if (!hasModelProviderKey(ORCHESTRATOR_MODEL) || !firstRoundEntries.length) {
-    return SECOND_SEARCH_FALLBACK;
-  }
-
-  const digest = firstRoundEntries
-    .map((entry, idx) => {
-      const top = entry.results
-        .slice(0, 3)
-        .map((r, i) => `${i + 1}. ${r.title} :: ${r.content.slice(0, 150)}`)
-        .join('\n');
-      return [
-        `[Primary #${idx + 1}] query=${entry.query}`,
-        `answer=${entry.answer || '(none)'}`,
-        top || '(no results)',
-      ].join('\n');
-    })
-    .join('\n\n');
-
-  const messages = [
-    {
-      role: 'system',
-      content:
-        'You evaluate retrieval completeness. Return JSON only. Request follow-up search only if there are major factual gaps.',
-    },
-    {
-      role: 'user',
-      content: [
-        `User query: "${userQuery}"`,
-        `Initial mode: ${searchPlan.mode}`,
-        '',
-        'Primary search digest:',
-        digest,
-        '',
-        'Return JSON schema exactly:',
-        '{"needsMore": boolean, "refinedQueries": string[], "additionalResultCount": number, "reason": string}',
-        'If needsMore=false, refinedQueries must be empty.',
-        'If needsMore=true, provide 1-2 concise refined queries.',
-        'If needsMore=true, additionalResultCount should adapt to remaining gaps (usually 6~10).',
-      ].join('\n'),
-    },
-  ];
-
-  try {
-    const decision = await callGlmJson(messages, {
-      model: ORCHESTRATOR_MODEL,
-      maxTokens: 220,
-      timeoutMs: 9000,
-      disableThinking: true,
-    });
-    return normalizeSecondSearchDecision(decision);
-  } catch (err) {
-    console.error('Second search decision error:', err.message);
-    return SECOND_SEARCH_FALLBACK;
-  }
-}
-
-async function runSearchBatch({ queries, round, res, maxResults }) {
-  const normalized = [...new Set((queries || []).map((q) => toStringSafe(q).trim()).filter(Boolean))];
-  if (!normalized.length) return [];
-
-  const settled = await Promise.allSettled(
-    normalized.map(async (query) => {
-      const data = await searchWeb(query, maxResults);
-      return {
-        round,
-        query,
-        maxResults,
-        answer: data.answer,
-        results: data.results,
-      };
-    }),
-  );
-
-  const entries = [];
-  settled.forEach((item, idx) => {
-    const query = normalized[idx];
-    if (item.status === 'fulfilled') {
-      entries.push(item.value);
-      sendSSE(res, 'search', item.value);
-    } else {
-      sendSSE(res, 'search_error', {
-        round,
-        query,
-        error: item.reason?.message || 'Search failed',
-      });
-    }
-  });
-
-  return entries;
-}
-
-function summarizeTopDomains(entries, max = 3) {
-  const domains = [];
-  for (const entry of entries || []) {
-    for (const result of entry.results || []) {
-      try {
-        const u = new URL(result.url);
-        if (!domains.includes(u.hostname)) domains.push(u.hostname);
-      } catch {
-        // ignore invalid url
-      }
-      if (domains.length >= max) break;
-    }
-    if (domains.length >= max) break;
-  }
-  return domains.join(', ');
-}
-
-function buildSearchContext(entries) {
-  if (!entries.length) return '';
-
-  return entries
-    .map((entry, idx) => {
-      const resultLines = entry.results
-        .slice(0, 5)
-        .map((r, i) => `${i + 1}. ${r.title}\nURL: ${r.url}\nSnippet: ${r.content}`)
-        .join('\n\n');
-
-      return [
-        `Search block ${idx + 1}`,
-        `Round: ${entry.round}`,
-        `Query: ${entry.query}`,
-        `Tavily answer: ${entry.answer || '(none)'}`,
-        resultLines || '(no results)',
-      ].join('\n');
-    })
-    .join('\n\n----\n\n');
-}
-
-function buildFinalMessages(messages, searchEntries) {
-  const hasSearch = searchEntries.length > 0;
-  const context = buildSearchContext(searchEntries);
-  const systemPrompt = hasSearch
-    ? [
-        'You are a careful assistant.',
-        'Use the provided search evidence when relevant.',
-        'Do not include inline source labels, URL lists, or a "출처" section in the answer body.',
-        'The client app will render one consolidated source list at the end.',
-        'If evidence is weak or conflicting, say so explicitly.',
-        '',
-        '[SEARCH CONTEXT START]',
-        context,
-        '[SEARCH CONTEXT END]',
-      ].join('\n')
-    : 'You are a helpful assistant. Answer directly and clearly.';
-
-  return [
-    { role: 'system', content: systemPrompt },
-    ...(messages || []).filter((m) => m?.role === 'user' || m?.role === 'assistant'),
-  ];
-}
-
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /api/chat — 6-stage orchestration pipeline
+// ──────────────────────────────────────────────────────────────────────────────
 app.post('/api/chat', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  const { messages = [], model: selectedModel } = req.body;
+  const mainModel = selectedModel || DEFAULT_MAIN_MODEL;
+  const fastModel = DEFAULT_FAST_MODEL;
+
+  const apiMessages = messages.map((m) => ({
+    role: m.role || 'user',
+    content: m.content || '',
+  }));
+
+  const lastUserMsg = [...apiMessages].reverse().find((m) => m.role === 'user')?.content || '';
+  const timer = (label) => {
+    const start = Date.now();
+    return () => console.log(`[pipeline] ${label}: ${Date.now() - start}ms`);
+  };
+
   try {
-    const { messages, model: requestedModel } = req.body || {};
+    // ── Stage 1: Screening ────────────────────────────────────────────────────
+    sendSSE(res, 'status', 'screening');
+    sendSSE(res, 'thinking_update', { stage: 'screening', text: '안전성 검사 중...' });
+    const t1 = timer('screening');
+    const screening = await screenQuery(lastUserMsg, fastModel);
+    t1();
 
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: 'messages is required' });
+    if (!screening.safe) {
+      sendSSE(res, 'status', 'rejected');
+      sendSSE(res, 'thinking_update', { stage: 'screening', text: `안전성 검사 불통과: ${screening.reason}` });
+      sendSSE(res, 'content', '죄송합니다. 해당 요청은 처리할 수 없습니다.');
+      sendSSE(res, 'status', 'streaming');
+      res.write('data: [DONE]\n\n');
+      return res.end();
     }
+    sendSSE(res, 'thinking_update', { stage: 'screening', text: '안전성 검사 통과 ✓' });
 
-    const lastMessage = messages[messages.length - 1];
-    if (!lastMessage || lastMessage.role !== 'user') {
-      return res.status(400).json({ error: 'last message must be from user' });
-    }
+    // ── Stage 2: Routing ──────────────────────────────────────────────────────
+    sendSSE(res, 'status', 'routing');
+    sendSSE(res, 'thinking_update', { stage: 'routing', text: '에이전트 선택 중...' });
+    const t2 = timer('routing');
+    const routing = await classifyQuery(lastUserMsg, fastModel);
+    t2();
 
-    // Start follow-up generation early so it can run in parallel with search/streaming.
-    const followUpsPrefetchPromise = generateFollowUpQuestions({
-      userQuery: lastMessage.content,
-      answerText: '',
-    }).catch((err) => {
-      console.error('Follow-up prefetch error:', err.message);
-      return [];
+    const agentList = routing.suggestedAgents;
+    const agentLabels = agentList.map((a) => AGENT_LABELS[a] || a);
+    sendSSE(res, 'routing_result', {
+      agents: agentList,
+      labels: agentLabels,
+      reasoning: routing.reasoning,
     });
+    const hasSearch = agentList.includes('research');
+    sendSSE(res, 'thinking_update', { stage: 'routing', text: `${agentLabels.join(', ')} 선택됨 ✓` });
 
-    const thinkingHistory = [];
-    const emittedThinkingKeys = new Set();
-    const emit = (payload) =>
-      emitThinking(res, {
-        ...payload,
-        history: thinkingHistory,
-        emittedKeys: emittedThinkingKeys,
-      });
-
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    if (typeof res.flushHeaders === 'function') {
-      res.flushHeaders();
-    }
-    res.write(': connected\n\n');
-
-    sendSSE(res, 'status', 'analyze_intent');
-    await emit({
-      stage: 'analyze_intent',
-      userQuery: lastMessage.content,
-    });
-
-    sendSSE(res, 'status', 'decide_search');
-    let searchPlan = await buildInitialSearchPlan(lastMessage.content, messages);
-    if (searchPlan.shouldSearch && searchPlan.primaryQueries.length > 0) {
-      const optimizedPrimaryQueries = await optimizeSearchQueries({
-        userQuery: lastMessage.content,
-        queries: searchPlan.primaryQueries,
-        mode: 'primary',
-        maxQueries: searchPlan.mode === 'multi' ? 3 : 1,
-      });
-      if (optimizedPrimaryQueries.length > 0) {
-        searchPlan = { ...searchPlan, primaryQueries: optimizedPrimaryQueries };
-      }
-
-      const hardenedPrimaryQueries = enforceOptimizedQueryQuality(
-        searchPlan.primaryQueries,
-        lastMessage.content,
-        'primary',
-        searchPlan.mode === 'multi' ? 3 : 1,
-      );
-      if (hardenedPrimaryQueries.length > 0) {
-        searchPlan = { ...searchPlan, primaryQueries: hardenedPrimaryQueries };
-      }
-    }
-
-    const initialTodoIntro = await generateInitialTodoIntro({
-      userQuery: lastMessage.content,
-      searchPlan,
-    });
-    if (initialTodoIntro) {
-      sendSSE(res, 'thinking_intro', initialTodoIntro);
-    }
-
-    sendSSE(res, 'search_plan', searchPlan);
-    await emit({
-      stage: 'decide_search',
-      userQuery: lastMessage.content,
-      context: { searchPlan, maxResults: searchPlan.primaryResultCount },
-    });
-
-    sendSSE(res, 'status', 'plan_queries');
-
-    let allSearchEntries = [];
-
-    if (searchPlan.shouldSearch && TAVILY_API_KEY) {
-      sendSSE(res, 'status', 'searching');
-      await emit({
-        stage: 'searching',
-        userQuery: lastMessage.content,
-        context: { searchPlan, maxResults: searchPlan.primaryResultCount },
-      });
-
-      const firstRoundEntries = await runSearchBatch({
-        queries: searchPlan.primaryQueries,
-        round: 1,
-        res,
-        maxResults: searchPlan.primaryResultCount,
-      });
-
-      allSearchEntries = [...firstRoundEntries];
-      await emit({
-        stage: 'search_results',
-        stageKey: 'search_results_round_1',
-        userQuery: lastMessage.content,
-        context: {
-          round: 1,
-          sourceCount: firstRoundEntries.reduce((acc, item) => acc + item.results.length, 0),
-          maxResults: searchPlan.primaryResultCount,
-          domainsText: summarizeTopDomains(firstRoundEntries, 4),
-        },
-      });
-
-      if (firstRoundEntries.length > 0) {
-        sendSSE(res, 'status', 'analyzing');
-        await emit({
-          stage: 'analyzing',
-          userQuery: lastMessage.content,
-          context: { searchPlan },
-        });
-        let secondDecision = await shouldDoSecondSearch(
-          lastMessage.content,
-          searchPlan,
-          firstRoundEntries,
-        );
-        if (secondDecision.needsMore && secondDecision.refinedQueries.length > 0) {
-          const optimizedRefinedQueries = await optimizeSearchQueries({
-            userQuery: lastMessage.content,
-            queries: secondDecision.refinedQueries,
-            mode: 'followup',
-            maxQueries: 2,
-          });
-          if (optimizedRefinedQueries.length > 0) {
-            secondDecision = { ...secondDecision, refinedQueries: optimizedRefinedQueries };
-          }
-
-          const hardenedRefinedQueries = enforceOptimizedQueryQuality(
-            secondDecision.refinedQueries,
-            lastMessage.content,
-            'followup',
-            2,
-          );
-          if (hardenedRefinedQueries.length > 0) {
-            secondDecision = { ...secondDecision, refinedQueries: hardenedRefinedQueries };
-          }
-        }
-        sendSSE(res, 'search_decision', secondDecision);
-        await emit({
-          stage: 'analyzing',
-          userQuery: lastMessage.content,
-          context: {
-            searchPlan,
-            secondDecision,
-            maxResults: secondDecision.additionalResultCount,
-          },
-        });
-
-        if (secondDecision.needsMore) {
-          sendSSE(res, 'status', 'searching_2');
-          await emit({
-            stage: 'searching_2',
-            userQuery: lastMessage.content,
-            context: { secondDecision, maxResults: secondDecision.additionalResultCount },
-          });
-          const secondRoundEntries = await runSearchBatch({
-            queries: secondDecision.refinedQueries,
-            round: 2,
-            res,
-            maxResults: secondDecision.additionalResultCount,
-          });
-          allSearchEntries = [...allSearchEntries, ...secondRoundEntries];
-          await emit({
-            stage: 'search_results',
-            stageKey: 'search_results_round_2',
-            userQuery: lastMessage.content,
-            context: {
-              round: 2,
-              sourceCount: secondRoundEntries.reduce((acc, item) => acc + item.results.length, 0),
-              maxResults: secondDecision.additionalResultCount,
-              domainsText: summarizeTopDomains(secondRoundEntries, 4),
-            },
-          });
-        }
-      } else {
-        sendSSE(res, 'status', 'search_failed');
-        await emit({
-          stage: 'error',
-          userQuery: lastMessage.content,
-          context: { error: '1차 검색 결과를 확보하지 못했습니다.' },
-        });
-      }
-    } else {
+    // If no search needed, skip search steps
+    if (!hasSearch) {
       sendSSE(res, 'status', 'search_skipped');
-      await emit({
-        stage: 'plan_queries',
-        userQuery: lastMessage.content,
-        context: { searchPlan },
-      });
-      if (searchPlan.shouldSearch && !TAVILY_API_KEY) {
-        sendSSE(res, 'search_error', {
+    }
+
+    // ── Stage 3: Parallel Agent Execution ─────────────────────────────────────
+    sendSSE(res, 'status', 'executing');
+    const t3 = timer('agents');
+
+    const agentResults = await dispatchAgents(agentList, apiMessages, mainModel, fastModel, {
+      onAgentStart: (label, type) => {
+        sendSSE(res, 'thinking_update', { stage: `agent_${type}`, text: `${label} 실행 중...` });
+        if (type === 'research') {
+          sendSSE(res, 'status', 'searching');
+        }
+      },
+      onAgentComplete: (label, success, type) => {
+        sendSSE(res, 'thinking_update', { stage: `agent_${type}`, text: success ? `${label} 완료 ✓` : `${label} 실패 ✗` });
+      },
+      onScreenshot: (screenshot) => {
+        sendSSE(res, 'browser_screenshot', screenshot);
+      },
+    });
+    t3();
+
+    // Attach search results to pipeline (if research agent ran)
+    const researchResult = agentResults.find((r) => r.agentName === AGENT_LABELS.research);
+    if (researchResult?.success && researchResult.result) {
+      const urlMatches = researchResult.result.match(/https?:\/\/[^\s)]+/g) || [];
+      const sources = urlMatches.slice(0, 5).map((url) => ({ url, title: url }));
+      if (sources.length > 0) {
+        sendSSE(res, 'search', {
+          query: lastUserMsg,
+          results: sources,
           round: 1,
-          query: searchPlan.primaryQueries[0] || '',
-          error: 'TAVILY_API_KEY is missing. Search is skipped.',
-        });
-        await emit({
-          stage: 'error',
-          userQuery: lastMessage.content,
-          context: { error: 'TAVILY_API_KEY is missing. Search is skipped.' },
         });
       }
     }
 
+    // ── Stage 4-5: Synthesis + Streaming ──────────────────────────────────────
     sendSSE(res, 'status', 'synthesize');
-    await emit({
-      stage: 'synthesize',
-      userQuery: lastMessage.content,
-      context: { searchPlan },
-    });
-
-    const finalMessages = buildFinalMessages(messages, allSearchEntries);
-
-    sendSSE(res, 'status', 'thinking');
-    await emit({
-      stage: 'thinking',
-      userQuery: lastMessage.content,
-      context: { searchPlan },
-    });
+    sendSSE(res, 'thinking_update', { stage: 'synthesize', text: '결과 종합 중...' });
+    const t4 = timer('synthesis');
 
     sendSSE(res, 'status', 'streaming');
-    const generatedAnswerText = await generateResponseWithSelectedModel({
-      model: requestedModel,
-      messages: finalMessages,
-      res,
-    });
-
-    let followUps = await followUpsPrefetchPromise;
-    if (!Array.isArray(followUps)) followUps = [];
-
-    // If prefetch produced nothing, regenerate once with full answer context.
-    if (followUps.length === 0) {
-      followUps = await generateFollowUpQuestions({
-        userQuery: lastMessage.content,
-        answerText: generatedAnswerText,
-      });
+    let fullAnswer = '';
+    for await (const chunk of synthesizeResults(agentResults, apiMessages, mainModel)) {
+      fullAnswer += chunk;
+      sendSSE(res, 'content', chunk);
     }
+    t4();
 
+    // ── Stage 6: Follow-up questions ──────────────────────────────────────────
+    const followUps = await generateFollowUps(fullAnswer, lastUserMsg, fastModel);
     if (followUps.length > 0) {
       sendSSE(res, 'follow_ups', followUps);
     }
 
     res.write('data: [DONE]\n\n');
-
+  } catch (err) {
+    console.error('[pipeline] Error:', err);
+    sendSSE(res, 'content', `오류가 발생했습니다: ${err.message}`);
+    res.write('data: [DONE]\n\n');
+  } finally {
     res.end();
-  } catch (err) {
-    console.error('Chat error:', err.message);
-    if (!res.headersSent) {
-      res.status(500).json({ error: err.message });
-    } else {
-      try {
-        sendSSE(res, 'content', `오류가 발생했습니다: ${err.message}`);
-        res.write('data: [DONE]\n\n');
-      } catch {
-        // ignore secondary stream error
-      }
-      res.end();
-    }
   }
 });
 
-app.post('/api/search', async (req, res) => {
-  try {
-    const { query, maxResults } = req.body || {};
-    if (!toStringSafe(query).trim()) {
-      return res.status(400).json({ error: 'query is required' });
-    }
-
-    if (!TAVILY_API_KEY) {
-      return res.status(500).json({ error: 'TAVILY_API_KEY is missing' });
-    }
-
-    const data = await searchWeb(query, maxResults);
-    res.json(data);
-  } catch (err) {
-    console.error('Search error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/health', (_req, res) => {
+// ── Health check ─────────────────────────────────────────────────────────────
+app.get('/health', (req, res) => {
   res.json({
-    ok: true,
-    service: 'agentchat-api',
-    timestamp: new Date().toISOString(),
-    searchReady: Boolean(TAVILY_API_KEY),
-    models: {
-      orchestrator: ORCHESTRATOR_MODEL,
-      response: RESPONSE_MODEL,
-      followup: FOLLOWUP_MODEL,
-    },
+    status: 'ok',
+    mainModel: DEFAULT_MAIN_MODEL,
+    fastModel: DEFAULT_FAST_MODEL,
+    features: ['orchestration', 'playwright-search', 'multi-agent'],
   });
 });
 
+// ── Start ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  logStartupStatus();
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`[server] Orchestration server running on port ${PORT}`);
+  console.log(`[server] Main model: ${DEFAULT_MAIN_MODEL}`);
+  console.log(`[server] Fast model: ${DEFAULT_FAST_MODEL}`);
 });

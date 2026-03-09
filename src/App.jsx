@@ -24,45 +24,37 @@ const FOLLOWUP_SPACER_MOBILE = { min: 140, max: 240, ratio: 0.28 };
 const MAX_THINKING_ACTIVITY_ITEMS = 64;
 
 const STATUS_STEP_DELAY_MS = {
-  analyze_intent: 450,
-  decide_search: 520,
-  plan_queries: 460,
-  searching: 420,
-  analyzing: 420,
-  searching_2: 420,
-  search_skipped: 240,
-  search_failed: 240,
+  screening: 350,
+  routing: 420,
+  executing: 380,
+  searching: 300,
+  search_skipped: 200,
   synthesize: 380,
-  thinking: 220,
   streaming: 0,
+  rejected: 0,
 };
 
 const STATUS_TO_STEP_INDEX = {
-  analyze_intent: 0,
-  decide_search: 1,
-  plan_queries: 2,
+  screening: 0,
+  routing: 1,
+  executing: 2,
   searching: 3,
-  analyzing: 4,
-  searching_2: 5,
-  search_skipped: 5,
-  search_failed: 5,
-  synthesize: 6,
-  thinking: 7,
-  streaming: 7,
+  search_skipped: 3,
+  synthesize: 4,
+  streaming: 5,
+  rejected: 0,
 };
 
 const PIPELINE_TEMPLATE = [
-  { id: 'analyze_intent', label: '요청 접수/분석', status: 'pending' },
-  { id: 'decide_search', label: '검색 필요 여부 판단', status: 'pending' },
-  { id: 'plan_queries', label: 'Todo 리스트 작성', status: 'pending' },
-  { id: 'search_1', label: '1차 웹검색 실행', status: 'pending', sources: [] },
-  { id: 'analyze_results', label: '\uac80\uc0c9 \uacb0\uacfc \uac80\ud1a0', status: 'pending' },
-  { id: 'search_2', label: '2차 웹검색 실행', status: 'pending', sources: [] },
-  { id: 'synthesize', label: '답변 구조 설계', status: 'pending' },
+  { id: 'screening', label: '안전성 검사', status: 'pending' },
+  { id: 'routing', label: '질문 분석 · 에이전트 선택', status: 'pending' },
+  { id: 'agent_exec', label: '에이전트 병렬 실행', status: 'pending' },
+  { id: 'search', label: '웹 검색 (Playwright)', status: 'pending', sources: [] },
+  { id: 'synthesize', label: '결과 종합', status: 'pending' },
   { id: 'generate', label: '답변 작성', status: 'pending' },
 ];
 
-const SEARCH_STEP_IDS = new Set(['search_1', 'analyze_results', 'search_2']);
+const SEARCH_STEP_IDS = new Set(['search']);
 const SIDEBAR_NAV_ITEMS = [
   { key: 'new-chat', label: '새로운 채팅', icon: 'compose', active: true },
   { key: 'hwp-studio', label: 'HWP Studio', icon: 'hwp', active: false },
@@ -825,33 +817,29 @@ function App() {
   const applyStatusTransition = (status) => {
     updatePipeline((pipeline) => {
       switch (status) {
-        case 'analyze_intent':
+        case 'screening':
           return applyCursor(pipeline, 0);
-        case 'decide_search':
+        case 'routing':
           return applyCursor(pipeline, 1);
-        case 'plan_queries':
+        case 'executing':
           return applyCursor(pipeline, 2);
         case 'searching':
           return applyCursor(pipeline, 3);
-        case 'analyzing':
-          return applyCursor(pipeline, 4);
-        case 'searching_2':
-          return applyCursor(pipeline, 5);
-        case 'search_skipped':
-        case 'search_failed': {
+        case 'search_skipped': {
           pipeline.steps = pipeline.steps.map((step) => {
             if (SEARCH_STEP_IDS.has(step.id)) {
               return { ...step, status: 'skipped' };
             }
             return step;
           });
-          return applyCursor(pipeline, 2, { completeTarget: true });
+          return applyCursor(pipeline, 2, { completeTarget: false });
         }
         case 'synthesize':
-          return applyCursor(pipeline, 6);
-        case 'thinking':
+          return applyCursor(pipeline, 4);
         case 'streaming':
-          return applyCursor(pipeline, 7);
+          return applyCursor(pipeline, 5);
+        case 'rejected':
+          return applyCursor(pipeline, 0, { completeTarget: true });
         default:
           return pipeline;
       }
@@ -860,47 +848,40 @@ function App() {
 
   const setStatusNarration = (status) => {
     switch (status) {
-      case 'analyze_intent':
-        setStepNoteIfEmpty('analyze_intent', '\uc0ac\uc6a9\uc790 \uc694\uccad\uc744 \ubd84\uc11d\ud558\uace0 \ud575\uc2ec \uc758\ub3c4\ub97c \uc815\ub9ac\ud558\ub294 \uc911');
+      case 'screening':
+        setStepNoteIfEmpty('screening', '사용자 요청의 안전성을 검사하는 중');
+        upsertThinkingProgress('screening', '안전성 검사를 수행하고 있습니다.', { spinning: true });
         break;
-      case 'decide_search':
-        setStepNoteIfEmpty('decide_search', '\ucd5c\uc2e0 \uadfc\uac70 \ud655\uc778\uc774 \ud544\uc694\ud55c\uc9c0 \ud310\ub2e8\ud558\ub294 \uc911');
+      case 'routing':
+        setProgressSpinning('screening', false);
+        setStepNoteIfEmpty('routing', '질문을 분석하고 최적의 에이전트를 선택하는 중');
+        upsertThinkingProgress('routing', '질문을 분석하고 에이전트를 선택하고 있습니다.', { spinning: true });
         break;
-      case 'plan_queries':
-        setStepNoteIfEmpty('plan_queries', '\uc2e4\ud589 \uc21c\uc11c\ub97c \ud3ec\ud568\ud55c Todo \ub9ac\uc2a4\ud2b8\ub97c \uad6c\uc131\ud558\ub294 \uc911');
+      case 'executing':
+        setProgressSpinning('routing', false);
+        setStepNoteIfEmpty('agent_exec', '선택된 에이전트가 병렬로 실행 중');
+        upsertThinkingProgress('executing', '에이전트를 실행하고 있습니다.', { spinning: true });
         break;
       case 'searching':
-        setStepNoteIfEmpty('search_1', 'Todo 1\ub2e8\uacc4: 1\ucc28 \uc6f9\uac80\uc0c9\uc744 \uc2e4\ud589\ud558\ub294 \uc911');
-        upsertThinkingProgress('searching', '웹검색을 실행하고 있습니다.', { spinning: true });
-        break;
-      case 'analyzing':
-        setProgressSpinning('searching', false);
-        setProgressSpinning('searching_2', false);
-        setStepNoteIfEmpty('analyze_results', 'Todo 2\ub2e8\uacc4: \uac80\uc0c9 \uacb0\uacfc\ub97c \uac80\ud1a0\ud558\uace0 \ub204\ub77d \uc815\ubcf4\ub97c \ud655\uc778\ud558\ub294 \uc911');
-        upsertThinkingProgress('analyzing', '검색 결과를 분석하고 있습니다.');
-        break;
-      case 'searching_2':
-        setProgressSpinning('searching', false);
-        setStepNoteIfEmpty('search_2', 'Todo 3\ub2e8\uacc4: 2\ucc28 \uc6f9\uac80\uc0c9\uc744 \uc2e4\ud589\ud558\ub294 \uc911');
-        upsertThinkingProgress('searching_2', '누락 정보를 보강하기 위해 추가 검색 중입니다.', { spinning: true });
-        break;
-      case 'synthesize':
-        setProgressSpinning('searching', false);
-        setProgressSpinning('searching_2', false);
-        setStepNoteIfEmpty('synthesize', '\uc218\uc9d1\ud55c \uadfc\uac70\ub97c \ubc14\ud0d5\uc73c\ub85c \ub2f5\ubcc0 \uad6c\uc870\ub97c \uc124\uacc4\ud558\ub294 \uc911');
-        break;
-      case 'thinking':
-        setProgressSpinning('searching', false);
-        setProgressSpinning('searching_2', false);
-        setStepNoteIfEmpty('generate', '\uc2e0\uc911\ud558\uac8c \ub2f5\ubcc0\uc744 \uc815\ub9ac\ud558\ub294 \uc911');
-        upsertThinkingProgress('thinking', '신중하게 생각해서 답변을 정리하고 있습니다.', { spinning: true });
+        setStepNoteIfEmpty('search', 'Playwright 브라우저로 웹 검색 실행 중');
+        upsertThinkingProgress('searching', '실시간 웹 검색을 수행하고 있습니다.', { spinning: true });
         break;
       case 'search_skipped':
-      case 'search_failed':
+        setStepSkipped('search', '웹 검색이 필요하지 않은 요청입니다.');
+        break;
+      case 'synthesize':
+        setProgressSpinning('executing', false);
         setProgressSpinning('searching', false);
-        setProgressSpinning('searching_2', false);
+        setStepNoteIfEmpty('synthesize', '에이전트 결과를 종합하여 답변 구조를 설계하는 중');
+        upsertThinkingProgress('synthesize', '결과를 종합하고 있습니다.', { spinning: true });
         break;
       case 'streaming':
+        setProgressSpinning('synthesize', false);
+        setStepNoteIfEmpty('generate', '답변을 작성하고 있습니다.');
+        upsertThinkingProgress('streaming', '답변을 작성하고 있습니다.', { spinning: true });
+        break;
+      case 'rejected':
+        setStepNote('screening', '안전성 검사 불통과');
         break;
       default:
         break;
@@ -940,8 +921,7 @@ function App() {
 
         if (
           nextStep.id === 'generate' &&
-          nextStep.status === 'completed' &&
-          (!nextStep.note || nextStep.note === '\uc2e0\uc911\ud558\uac8c \ub2f5\ubcc0\uc744 \uc815\ub9ac\ud558\ub294 \uc911')
+          nextStep.status === 'completed'
         ) {
           nextStep = { ...nextStep, note: '답변 작성 완료' };
         }
@@ -984,7 +964,7 @@ function App() {
 
   const attachSearchResult = (payload) => {
     const round = payload.round || 1;
-    const stepId = round === 2 ? 'search_2' : 'search_1';
+    const stepId = 'search';
 
     const sources = (payload.results || [])
       .map((result) => ({
@@ -1138,7 +1118,7 @@ function App() {
       });
     }
 
-    queueStatusEvent('analyze_intent');
+    queueStatusEvent('screening');
 
     try {
       const apiMessages = nextMessages.map((m) => ({ role: m.role, content: m.content }));
@@ -1183,25 +1163,17 @@ function App() {
               continue;
             }
 
-            if (parsed.type === 'search_plan') {
-              updateLatestAssistant((assistant) => ({ ...assistant, searchPlan: parsed.data }));
+            if (parsed.type === 'routing_result') {
+              const labels = parsed.data?.labels || [];
+              setStepNote('routing', `에이전트 선택: ${labels.join(', ')}`);
+              setStepNote('agent_exec', `실행 대상: ${labels.join(', ')}`);
+              continue;
+            }
 
-              const firstTopic = parsed.data?.primaryQueries?.[0] || '요청 주제';
-              if (parsed.data?.shouldSearch) {
-                setStepNote('decide_search', `"${firstTopic}" 관련 최신/근거 확인을 위해 웹검색이 필요합니다.`);
-                setStepNote(
-                  'plan_queries',
-                  parsed.data?.mode === 'multi'
-                    ? `Todo 확정: ${(parsed.data?.primaryQueries || []).length}개 쿼리, 쿼리당 최대 ${parsed.data?.primaryResultCount || 5}건 검색합니다.`
-                    : `Todo 확정: 핵심 쿼리 1개, 최대 ${parsed.data?.primaryResultCount || 5}건 검색합니다.`,
-                );
-              } else {
-                setStepNote('decide_search', '현재 질문은 내부 지식만으로 답변 가능한 요청입니다.');
-                setStepSkipped('plan_queries', 'Todo 확정: 검색 단계 없이 답변 작성 단계로 이동합니다.');
-                setStepSkipped('search_1');
-                setStepSkipped('analyze_results');
-                setStepSkipped('search_2');
-                queueStatusEvent('search_skipped');
+            if (parsed.type === 'thinking_update') {
+              const { stage, text } = parsed.data || {};
+              if (stage && text) {
+                upsertThinkingProgress(stage, text, { spinning: !text.includes('✓') && !text.includes('✗') });
               }
               continue;
             }
@@ -1211,28 +1183,8 @@ function App() {
               continue;
             }
 
-            if (parsed.type === 'search_decision') {
-              updateLatestAssistant((assistant) => ({
-                ...assistant,
-                secondSearchDecision: parsed.data,
-              }));
-
-              if (!parsed.data?.needsMore) {
-                setStepNote(
-                  'analyze_results',
-                  parsed.data?.reason || 'Todo 2단계 완료: 현재 검색 결과만으로 충분한 근거를 확보했습니다.',
-                );
-                setStepSkipped('search_2', 'Todo 3단계 생략: 추가 검색이 필요하지 않습니다.');
-              } else {
-                setStepNote(
-                  'analyze_results',
-                  parsed.data?.reason || 'Todo 2단계 판단: 누락 정보 보강을 위해 추가 검색이 필요합니다.',
-                );
-                setStepNote(
-                  'search_2',
-                  `Todo 3단계 확정: ${(parsed.data?.refinedQueries || []).length}개 쿼리, 쿼리당 최대 ${parsed.data?.additionalResultCount || 10}건 추가 검색합니다.`,
-                );
-              }
+            if (parsed.type === 'thinking_text') {
+              appendThinkingText(parsed.data);
               continue;
             }
 
@@ -1241,20 +1193,14 @@ function App() {
               continue;
             }
 
-            if (parsed.type === 'search_error') {
-              const stepId = parsed.data?.round === 2 ? 'search_2' : 'search_1';
-              const stageKey = parsed.data?.round === 2 ? 'searching_2' : 'searching';
-              upsertThinkingProgress(
-                stageKey,
-                `웹검색 실행 실패: ${parsed.data?.error || '알 수 없는 오류'}`,
-                { spinning: false },
-              );
-              setStepNote(stepId, `검색 실패: ${parsed.data?.error || '알 수 없는 오류'}`);
-              continue;
-            }
-
-            if (parsed.type === 'thinking_text') {
-              // Thinking 패널에는 현재 진행 상태만 노출합니다.
+            if (parsed.type === 'browser_screenshot') {
+              updateLatestAssistant((assistant) => ({
+                ...assistant,
+                browserScreenshot: parsed.data,
+              }));
+              if (parsed.data?.label) {
+                upsertThinkingProgress('browser', `🖥️ ${parsed.data.label}`, { spinning: true });
+              }
               continue;
             }
 
@@ -1492,8 +1438,8 @@ function App() {
         <main ref={chatContainerRef} className="chat-container" onScroll={handleChatScroll}>
           {messages.length === 0 ? (
             <div className="empty-state">
-              <p className="empty-title">교사를 위한 AI 비서, issamGPT</p>
-              <p className="empty-sub">수업 준비, 문서 작성, 학급 운영 업무를 빠르고 정확하게 도와드립니다.</p>
+              <p className="empty-title">AI Agent Orchestrator</p>
+              <p className="empty-sub">6단계 파이프라인으로 전문 AI 에이전트들이 협력하여 답변합니다.</p>
             </div>
           ) : (
             <div className="messages">
@@ -1515,6 +1461,23 @@ function App() {
                       />
                     );
                   })()}
+
+                  {/* Browser screenshot monitor */}
+                  {message.browserScreenshot?.image && isLoading && idx === messages.length - 1 && (
+                    <div className="browser-monitor">
+                      <div className="browser-monitor-titlebar">
+                        <span className="browser-dot red" />
+                        <span className="browser-dot yellow" />
+                        <span className="browser-dot green" />
+                        <span className="browser-monitor-label">{message.browserScreenshot.label || 'Browser'}</span>
+                      </div>
+                      <img
+                        src={`data:image/jpeg;base64,${message.browserScreenshot.image}`}
+                        alt="Browser screenshot"
+                        className="browser-monitor-img"
+                      />
+                    </div>
+                  )}
 
                   {(message.content || message.role === 'user') && (
                     <ChatMessage

@@ -1580,3 +1580,48 @@ textarea:focus-visible {
     animation-iteration-count: infinite !important;
   }
 }
+
+/* ── Browser Monitor (Playwright screenshots) ───────────────────────── */
+.browser-monitor {
+  margin: 8px 0 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  overflow: hidden;
+  max-width: 520px;
+  background: #1a1a1a;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.browser-monitor-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #2a2a2a;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.browser-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.browser-dot.red { background: #ff5f57; }
+.browser-dot.yellow { background: #febc2e; }
+.browser-dot.green { background: #28c840; }
+
+.browser-monitor-label {
+  margin-left: 8px;
+  font-size: 0.72rem;
+  color: #aaa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.browser-monitor-img {
+  width: 100%;
+  display: block;
+  image-rendering: auto;
+}
