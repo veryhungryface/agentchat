@@ -18,6 +18,24 @@ async function snap(page, label, cb) {
   } catch { /* skip */ }
 }
 
+/** Take periodic screenshots during long waits */
+async function snapWait(page, label, ms, cb, interval = 1500) {
+  let elapsed = 0;
+  while (elapsed < ms) {
+    const wait = Math.min(interval, ms - elapsed);
+    await page.waitForTimeout(wait);
+    elapsed += wait;
+    await snap(page, label, cb);
+  }
+}
+
+/** Take a screenshot after page settles (load + short wait) */
+async function snapAfterLoad(page, label, cb) {
+  await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(800);
+  await snap(page, label, cb);
+}
+
 /**
  * Extract a simplified view of the page for LLM decision-making.
  */
@@ -64,6 +82,7 @@ export async function runBrowserAgent(messages, model, onScreenshot) {
   const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
 
   // Step 1: Generate a browsing plan
+  onScreenshot?.({ image: '', label: '🧠 브라우징 계획 생성 중...' });
   const plan = await generateJSON(model, [
     { role: 'user', content: lastUserMsg },
   ], {
@@ -133,6 +152,7 @@ Rules:
     let blocked = false;
     try {
       const resp = await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 12000 });
+      await snap(page, `🌐 ${startUrl} 로딩 중...`, onScreenshot);
       await page.waitForTimeout(1500);
       blocked = (resp && (resp.status() === 403 || resp.status() === 401)) ||
         await page.evaluate(() => /access denied|403 forbidden|you don't have permission/i.test(document.body?.innerText?.slice(0, 500) || ''));
@@ -149,7 +169,8 @@ Rules:
       await page.goto(`https://www.google.com/search?hl=ko&q=${encodeURIComponent(googleQuery)}`, {
         waitUntil: 'domcontentloaded', timeout: 10000,
       });
-      await page.waitForTimeout(2000);
+      await snap(page, `🔍 Google 검색 로딩...`, onScreenshot);
+      await page.waitForTimeout(1500);
       await snap(page, `🔍 Google에서 "${googleQuery}" 검색`, onScreenshot);
       usedGoogleFallback = true;
 
@@ -180,6 +201,7 @@ Rules:
       }
 
       // Extract data from wherever we ended up
+      await snap(page, '📋 페이지 데이터 분석 중...', onScreenshot);
       const data = await extractPageData(page, plan.goal || '', model);
       results.push(data);
       await snap(page, '✅ 정보 수집 완료', onScreenshot);
@@ -194,8 +216,9 @@ Rules:
         if (step.action === 'goto' && step.url) {
           onScreenshot?.({ image: '', label: `🌐 ${step.url} 이동 중...` });
           await page.goto(step.url, { waitUntil: 'domcontentloaded', timeout: 10000 });
+          await snap(page, `🌐 ${step.url} 로딩 중...`, onScreenshot);
           await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
-          await page.waitForTimeout(1000);
+          await page.waitForTimeout(800);
           await snap(page, `🌐 ${step.url} 로드 완료`, onScreenshot);
 
         } else if (step.action === 'search' && step.query) {
@@ -207,14 +230,16 @@ Rules:
             await snap(page, `🔍 "${step.query}" 입력`, onScreenshot);
             await page.waitForTimeout(300);
             await searchInput.press('Enter');
+            await snap(page, `🔍 검색 요청 전송...`, onScreenshot);
             await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {});
-            await page.waitForTimeout(2000);
+            await page.waitForTimeout(1500);
             await snap(page, `🔍 "${step.query}" 검색 결과`, onScreenshot);
           } else {
             const curUrl = page.url();
             const searchUrl = `${curUrl}${curUrl.includes('?') ? '&' : '?'}q=${encodeURIComponent(step.query)}`;
             await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
-            await page.waitForTimeout(2000);
+            await snap(page, `🔍 검색 결과 로딩...`, onScreenshot);
+            await page.waitForTimeout(1500);
             await snap(page, `🔍 "${step.query}" 검색 결과`, onScreenshot);
           }
 
@@ -227,12 +252,11 @@ Rules:
 
         } else if (step.action === 'scroll') {
           await page.evaluate(() => window.scrollBy(0, 600));
-          await page.waitForTimeout(800);
+          await page.waitForTimeout(600);
           await snap(page, '📜 스크롤 완료', onScreenshot);
 
         } else if (step.action === 'wait') {
-          await page.waitForTimeout(step.ms || 1500);
-          await snap(page, '⏳ 대기 완료', onScreenshot);
+          await snapWait(page, '⏳ 대기 중...', step.ms || 1500, onScreenshot, 1500);
 
         } else if (step.action === 'extract') {
           await snap(page, '📋 데이터 추출 중...', onScreenshot);
@@ -248,6 +272,7 @@ Rules:
 
     // Step 4: Always extract final page data
     if (results.length === 0) {
+      await snap(page, '📋 페이지 데이터 분석 중...', onScreenshot);
       const finalData = await extractPageData(page, plan.goal || lastUserMsg, model);
       results.push(finalData);
       await snap(page, '✅ 정보 수집 완료', onScreenshot);
@@ -261,6 +286,7 @@ Rules:
   }
 
   // Step 5: Compile results with LLM
+  onScreenshot?.({ image: '', label: '🧠 수집 데이터 분석 중...' });
   const pageData = results.join('\n\n---\n\n');
   const errorLog = consoleErrors.length > 0 ? `\n\nConsole errors:\n${consoleErrors.slice(0, 5).join('\n')}` : '';
 
@@ -572,7 +598,7 @@ async function fillAndSubmitLoginInFrame(frame, uid, pw) {
 }
 
 async function handleClick(page, target, model, onScreenshot) {
-  // Use LLM to find the right selector based on page context
+  await snap(page, `👆 "${target}" 찾는 중...`, onScreenshot);
   const ctx = await getPageContext(page);
   const result = await generateJSON(model, [
     { role: 'user', content: `On this page, I need to click: "${target}"\n\nPage title: ${ctx.title}\nAvailable elements:\n${ctx.elements.map((e, i) => `${i}. <${e.tag}> text="${e.text}" selector="${e.selector}" href="${e.href}"`).join('\n')}\n\nRespond with JSON: {"index": <element index to click>, "selector": "<CSS selector>"}` },
