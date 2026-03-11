@@ -55,7 +55,9 @@ function MarkdownCode({ inline, className, children, ...props }) {
   const lang = parseLanguage(className, codeText);
   const label = displayLanguage(lang);
 
-  if (inline) {
+  // Treat as inline: explicit inline, or single-line short code without language tag
+  const isShortBlock = !inline && !lang && !codeText.includes('\n') && codeText.length <= 60;
+  if (inline || isShortBlock) {
     return (
       <code className={className} {...props}>
         {children}

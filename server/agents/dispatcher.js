@@ -51,7 +51,7 @@ export async function dispatchAgents(agents, messages, mainModel, fastModel, cal
         onAgentComplete?.(label, true, agentType);
         return { agentName: label, result, success: true };
       } catch (err) {
-        console.error(`[dispatcher] ${label} error:`, err.message);
+        console.error(`[dispatcher] ${label} error:`, err.message, err.stack?.split('\n').slice(0, 3).join('\n'));
         onAgentComplete?.(label, false, agentType);
         return { agentName: label, result: '', success: false, error: err.message };
       }

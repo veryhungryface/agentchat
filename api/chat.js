@@ -149,6 +149,7 @@ ${results[0].result}
 
 Present the information naturally as your own response. Do NOT mention agents or internal processing.
 Do NOT use meta-commentary. Do NOT include any URLs, links, or "출처"/"참고"/"References" sections — source citations are handled separately.
+Use inline code (\`like this\`) for short terms/names, NOT fenced code blocks. Only use fenced code blocks for multi-line code.
 Respond directly in the same language as the user.`;
   }
 
@@ -159,6 +160,7 @@ ${sources}
 
 Combine into one coherent response. Do NOT mention sources or agents.
 Do NOT include any URLs, links, or "출처"/"참고"/"References" sections — source citations are handled separately.
+Use inline code (\`like this\`) for short terms/names, NOT fenced code blocks. Only use fenced code blocks for multi-line code.
 Respond directly in the same language as the user. Use markdown where appropriate.`;
 }
 
@@ -249,18 +251,28 @@ export default async function handler(req, res) {
           sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${label} 완료 ✓` });
           return { agentName: label, result, success: true };
         } catch (err) {
-          sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${label} 실패 ✗` });
+          console.error(`[api/chat] ${label} error:`, err.message);
+          sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${label} 실패: ${err.message.slice(0, 80)}` });
           return { agentName: label, result: '', success: false, error: err.message };
         }
       }),
     );
 
-    // ── Stage 4-5: Synthesis + Streaming ────────────────────────────────
-    const successfulResults = agentResults.filter((r) => r.success && r.result);
+    // ── Fallback: if all agents failed, try general directly ─────────
+    let successfulResults = agentResults.filter((r) => r.success && r.result);
     if (successfulResults.length === 0) {
-      sendSSE(res, 'content', '죄송합니다. 요청을 처리하는 중 오류가 발생했습니다.');
-      res.write('data: [DONE]\n\n');
-      return res.end();
+      const errors = agentResults.map((r) => `${r.agentName}: ${r.error}`).join(', ');
+      console.error('[api/chat] All agents failed:', errors);
+      sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: '에이전트 실패 — 일반 모드로 재시도 중...' });
+      try {
+        const result = await runAgent('general', apiMessages, fastModel);
+        agentResults.push({ agentName: '일반 에이전트 (폴백)', result, success: true });
+        successfulResults = agentResults.filter((r) => r.success && r.result);
+      } catch (fallbackErr) {
+        sendSSE(res, 'content', `오류가 발생했습니다: ${errors}`);
+        res.write('data: [DONE]\n\n');
+        return res.end();
+      }
     }
 
     sendSSE(res, 'status', 'synthesize');

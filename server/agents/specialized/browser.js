@@ -37,6 +37,30 @@ async function snapAfterLoad(page, label, cb) {
 }
 
 /**
+ * Run an async function (typically an LLM call) while periodically taking screenshots.
+ * This prevents long gaps in the screenshot stream during 5-15s LLM calls.
+ */
+async function withSnapshots(page, label, cb, asyncFn, interval = 2000) {
+  let done = false;
+  const loop = (async () => {
+    while (!done) {
+      await page.waitForTimeout(interval).catch(() => {});
+      if (!done) await snap(page, label, cb);
+    }
+  })();
+  try {
+    const result = await asyncFn();
+    done = true;
+    await loop.catch(() => {});
+    return result;
+  } catch (err) {
+    done = true;
+    await loop.catch(() => {});
+    throw err;
+  }
+}
+
+/**
  * Extract a simplified view of the page for LLM decision-making.
  */
 async function getPageContext(page) {
@@ -112,6 +136,7 @@ Rules:
     temperature: 0.3,
     maxTokens: 800,
   });
+  onScreenshot?.({ image: '', label: '🧠 계획 생성 완료' });
 
   console.log('[browser] Plan:', JSON.stringify(plan, null, 2));
 
@@ -202,7 +227,8 @@ Rules:
 
       // Extract data from wherever we ended up
       await snap(page, '📋 페이지 데이터 분석 중...', onScreenshot);
-      const data = await extractPageData(page, plan.goal || '', model);
+      const data = await withSnapshots(page, '📋 데이터 분석 중...', onScreenshot,
+        () => extractPageData(page, plan.goal || '', model));
       results.push(data);
       await snap(page, '✅ 정보 수집 완료', onScreenshot);
     } else {
@@ -260,7 +286,8 @@ Rules:
 
         } else if (step.action === 'extract') {
           await snap(page, '📋 데이터 추출 중...', onScreenshot);
-          const extracted = await extractPageData(page, step.what || plan.goal, model);
+          const extracted = await withSnapshots(page, '📋 데이터 추출 중...', onScreenshot,
+            () => extractPageData(page, step.what || plan.goal, model));
           results.push(extracted);
           await snap(page, '📋 데이터 추출 완료', onScreenshot);
         }
@@ -273,7 +300,8 @@ Rules:
     // Step 4: Always extract final page data
     if (results.length === 0) {
       await snap(page, '📋 페이지 데이터 분석 중...', onScreenshot);
-      const finalData = await extractPageData(page, plan.goal || lastUserMsg, model);
+      const finalData = await withSnapshots(page, '📋 최종 데이터 분석 중...', onScreenshot,
+        () => extractPageData(page, plan.goal || lastUserMsg, model));
       results.push(finalData);
       await snap(page, '✅ 정보 수집 완료', onScreenshot);
     }
@@ -300,6 +328,7 @@ Rules:
     maxTokens: 3000,
   });
 
+  onScreenshot?.({ image: '', label: '✅ 분석 완료' });
   return analysis;
 }
 
@@ -600,9 +629,10 @@ async function fillAndSubmitLoginInFrame(frame, uid, pw) {
 async function handleClick(page, target, model, onScreenshot) {
   await snap(page, `👆 "${target}" 찾는 중...`, onScreenshot);
   const ctx = await getPageContext(page);
-  const result = await generateJSON(model, [
-    { role: 'user', content: `On this page, I need to click: "${target}"\n\nPage title: ${ctx.title}\nAvailable elements:\n${ctx.elements.map((e, i) => `${i}. <${e.tag}> text="${e.text}" selector="${e.selector}" href="${e.href}"`).join('\n')}\n\nRespond with JSON: {"index": <element index to click>, "selector": "<CSS selector>"}` },
-  ], { temperature: 0.1, maxTokens: 200 });
+  const result = await withSnapshots(page, `👆 "${target}" 분석 중...`, onScreenshot, () =>
+    generateJSON(model, [
+      { role: 'user', content: `On this page, I need to click: "${target}"\n\nPage title: ${ctx.title}\nAvailable elements:\n${ctx.elements.map((e, i) => `${i}. <${e.tag}> text="${e.text}" selector="${e.selector}" href="${e.href}"`).join('\n')}\n\nRespond with JSON: {"index": <element index to click>, "selector": "<CSS selector>"}` },
+    ], { temperature: 0.1, maxTokens: 200 }));
 
   const selector = result.selector || `text=${target}`;
   try {

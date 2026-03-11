@@ -11,7 +11,12 @@ export async function* synthesizeResults(agentResults, messages, model) {
   const successfulResults = agentResults.filter((r) => r.success && r.result);
 
   if (successfulResults.length === 0) {
-    yield '죄송합니다. 요청을 처리하는 중 오류가 발생했습니다. 다시 시도해 주세요.';
+    const errors = agentResults
+      .filter((r) => !r.success)
+      .map((r) => `${r.agentName}: ${r.error || 'unknown'}`)
+      .join('\n');
+    console.error('[synthesizer] All agents failed:\n', errors);
+    yield `죄송합니다. 요청을 처리하는 중 오류가 발생했습니다.\n\n오류 상세: ${errors}`;
     return;
   }
 
@@ -30,6 +35,7 @@ ${agentContext}
 Present the information naturally as your own response. Do NOT mention any agents, analysis steps, or internal processing.
 Do NOT use meta-commentary like "[결과]", "[분석]", "[답변 구성]" etc.
 IMPORTANT: Do NOT include any URLs, links, or "출처"/"참고"/"References" sections in your response. Source citations are handled separately by the system.
+Use inline code (\`like this\`) for short terms/names, NOT fenced code blocks. Only use fenced code blocks for multi-line code.
 Respond directly and concisely in the same language as the user.`
     : `You are a helpful AI assistant. Below are reference materials from multiple sources:
 
@@ -39,6 +45,7 @@ Combine these into one coherent, well-structured response.
 Do NOT mention sources, agents, or internal processing.
 Do NOT use meta-commentary like "[결과]", "[분석]", "[답변 구성]" etc.
 IMPORTANT: Do NOT include any URLs, links, or "출처"/"참고"/"References" sections in your response. Source citations are handled separately by the system.
+Use inline code (\`like this\`) for short terms/names, NOT fenced code blocks. Only use fenced code blocks for multi-line code.
 Respond directly in the same language as the user. Use markdown formatting where appropriate.`;
 
   yield* llmStream(model, messages, {

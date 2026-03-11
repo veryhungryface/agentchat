@@ -153,6 +153,25 @@ app.post('/api/chat', async (req, res) => {
     });
     t3();
 
+    // Fallback: if all agents failed, try general agent directly
+    const allFailed = agentResults.every((r) => !r.success || !r.result);
+    if (allFailed) {
+      const errors = agentResults.map((r) => `${r.agentName}: ${r.error}`).join(', ');
+      console.error('[pipeline] All agents failed:', errors);
+      sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `에이전트 실패 — 일반 모드로 재시도 중...` });
+      try {
+        const { runGeneralAgent } = await import('./server/agents/specialized/general.js');
+        const fallbackResult = await runGeneralAgent(apiMessages, fastModel);
+        agentResults.push({ agentName: '일반 에이전트 (폴백)', result: fallbackResult, success: true });
+        sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: '일반 모드 폴백 완료 ✓' });
+      } catch (fallbackErr) {
+        console.error('[pipeline] Fallback also failed:', fallbackErr.message);
+        sendSSE(res, 'content', `오류가 발생했습니다: ${errors}`);
+        res.write('data: [DONE]\n\n');
+        return res.end();
+      }
+    }
+
     // Attach search results to pipeline (if research agent ran)
     const researchResult = agentResults.find((r) => r.agentName === AGENT_LABELS.research);
     if (researchResult?.success && researchResult.result) {
