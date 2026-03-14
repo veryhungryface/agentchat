@@ -121,7 +121,7 @@ function HtmlPreview({ code, seamless = false }) {
     <iframe
       ref={iframeRef}
       srcDoc={srcdoc}
-      sandbox="allow-scripts"
+      sandbox="allow-scripts allow-same-origin"
       className={seamless ? 'interactive-iframe' : 'md-preview-iframe'}
       style={{
         height: loaded ? `${height}px` : (seamless ? '200px' : '300px'),
