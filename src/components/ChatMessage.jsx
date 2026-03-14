@@ -57,7 +57,7 @@ function isPreviewable(lang, code) {
   return false;
 }
 
-const IFRAME_BASE_STYLE = 'html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#fff;color:#1a1a1a;}body{padding:16px;}';
+const IFRAME_BASE_STYLE = 'html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:transparent;color:#1a1a1a;}body{padding:0;}';
 
 const IFRAME_RESIZE_SCRIPT = `<script>
 (function(){
@@ -230,6 +230,76 @@ function MarkdownCode({ inline, className, children, ...props }) {
   );
 }
 
+function InteractiveMenu({ code }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch { /* ignore */ }
+    setOpen(false);
+  };
+
+  const handleDownload = () => {
+    const blob = new Blob([code], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'interactive.html';
+    a.click();
+    URL.revokeObjectURL(url);
+    setOpen(false);
+  };
+
+  return (
+    <div className="interactive-menu" ref={menuRef}>
+      <button
+        type="button"
+        className="interactive-menu-btn"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="메뉴"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="6" r="1.5" fill="currentColor"/>
+          <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+          <circle cx="12" cy="18" r="1.5" fill="currentColor"/>
+        </svg>
+      </button>
+      {open && (
+        <div className="interactive-menu-dropdown">
+          <button type="button" onClick={handleCopy}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="4" y="8" width="11" height="11" rx="3" stroke="currentColor" strokeWidth="1.6"/>
+              <path d="M15.3 15H17a3 3 0 003-3V7a3 3 0 00-3-3h-5a3 3 0 00-3 3v.5" stroke="currentColor" strokeWidth="1.6"/>
+            </svg>
+            {copied ? '복사됨!' : '코드 복사'}
+          </button>
+          <button type="button" onClick={handleDownload}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 3v13m0 0l-4-4m4 4l4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+            </svg>
+            다운로드
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChatMessage({ message, isStreaming }) {
   const isUser = message.role === 'user';
 
@@ -262,6 +332,7 @@ function ChatMessage({ message, isStreaming }) {
         ) : null}
         {message.interactiveHtml && (
           <div className="interactive-embed">
+            <InteractiveMenu code={message.interactiveHtml} />
             <HtmlPreview code={message.interactiveHtml} seamless />
           </div>
         )}

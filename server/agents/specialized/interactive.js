@@ -11,7 +11,7 @@ Advantages: lightweight, instant render, beautiful animations, no JS needed.
 OUTPUT FORMAT for SVG mode:
 \`\`\`html
 <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>body{margin:0;padding:0;background:#fff;display:flex;justify-content:center}</style>
+<style>body{margin:0;padding:0;background:transparent;display:flex;justify-content:center}</style>
 </head><body>
 <svg viewBox="0 0 WIDTH HEIGHT" xmlns="http://www.w3.org/2000/svg">
   <style>/* CSS here */</style>
@@ -44,13 +44,32 @@ HTML+JS RULES:
 ## UNIVERSAL RULES:
 1. Output ONE \`\`\`html code fence. Nothing else.
 2. COMPACT code: minimize whitespace and comments.
-3. Background: white (#fff). Design accordingly.
-4. Use Korean UI text when user writes Korean.
-5. Write a 1-sentence description, then a BLANK LINE, then the code fence.
-6. CRITICAL: There MUST be an empty line before \`\`\`html.
-7. No explanation after the closing \`\`\`.
-8. Respond in the same language as the user.
-9. Make it visually stunning — users see this rendered live in chat.`;
+3. Use Korean UI text when user writes Korean.
+4. Write a 1-sentence description, then a BLANK LINE, then the code fence.
+5. CRITICAL: There MUST be an empty line before \`\`\`html.
+6. No explanation after the closing \`\`\`.
+7. Respond in the same language as the user.
+8. Make it visually polished — users see this rendered live in chat.
+
+## CRITICAL DESIGN RULE — SIZE & LAYOUT:
+Your content is rendered INSIDE a chat message bubble. It should feel like a natural part of the conversation, NOT a full-page app.
+
+SIZE PRINCIPLES:
+- Use ONLY as much space as the content actually needs. Do NOT stretch to fill the viewport.
+- A simple 3-item comparison → small cards in a row. NOT a giant full-width dashboard.
+- A single chart → moderate size. NOT a sprawling multi-section page.
+- Think COMPACT and FOCUSED. White space is good, but empty filler space is bad.
+- Max width: 600px for most content. Only go wider for genuinely complex dashboards.
+- SVG viewBox height should tightly fit the content. Do NOT pad with empty space.
+- For HTML mode: use \`max-width:600px;margin:0 auto\` on the outermost container.
+- Prefer horizontal card layouts (flex row) over vertical stacking when items are few (2-4 items).
+
+BACKGROUND PRINCIPLES:
+- NEVER wrap entire content in a card/box/container with its own background/border/shadow.
+- body style: \`margin:0;padding:0;background:transparent\`
+- SVG background: \`fill="none"\` or \`fill="transparent"\`, NOT \`fill="#fafafa"\`.
+- Individual inner cards/elements with subtle backgrounds are OK.
+- The OUTERMOST layer must be transparent/borderless — it sits inside a chat bubble.`;
 
 export async function runInteractiveAgent(messages, model) {
   return generate(model, messages, {
