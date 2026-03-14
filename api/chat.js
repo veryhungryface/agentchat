@@ -85,9 +85,9 @@ Rules:
     const agents = Array.isArray(parsed.suggestedAgents) && parsed.suggestedAgents.length > 0
       ? parsed.suggestedAgents
       : ['general'];
-    // Interactive always needs general for text explanation
-    if (agents.includes('interactive') && !agents.includes('general')) {
-      agents.push('general');
+    // Interactive runs alone — it provides its own intro/outro text
+    if (agents.includes('interactive')) {
+      return { suggestedAgents: ['interactive'], reasoning: parsed.reasoning || '' };
     }
     return { suggestedAgents: agents, reasoning: parsed.reasoning || '' };
   } catch {
@@ -238,13 +238,26 @@ HTML+JS RULES:
    Auto-render converts all \\\`$...$\\\` and \\\`$$...$$\\\` into beautiful rendered math.
    ALWAYS use for: formulas, variable labels, greek letters (\\\`$\\\\alpha$\\\`), fractions (\\\`$\\\\frac{1}{f}$\\\`).
 
-## UNIVERSAL RULES:
-1. Output ONE \\\`\\\`\\\`html code fence. Nothing else.
-2. COMPACT code.
-3. Use Korean UI text when user writes Korean.
-4. Write a 1-sentence description, then a BLANK LINE, then the code fence.
-5. CRITICAL: There MUST be an empty line before \\\`\\\`\\\`html. No explanation after closing \\\`\\\`\\\`.
-6. Respond in the same language as the user. Make it visually polished.
+## UNIVERSAL RULES — 3-STEP OUTPUT FORMAT (follow STRICTLY):
+Your response MUST have exactly 3 parts in this order:
+
+STEP 1 — INTRO (1-2 sentences): Briefly describe what you will show.
+Example: "삼각함수의 원리를 단위원으로 시각화해 보여드리겠습니다."
+
+STEP 2 — CODE FENCE:
+\\\`\\\`\\\`html
+(your HTML/SVG code)
+\\\`\\\`\\\`
+
+STEP 3 — OUTRO (1-3 sentences): Briefly explain the content, usage tips, key takeaways.
+Example: "슬라이더를 움직여 각도를 변경하면 sin, cos 값이 실시간으로 변합니다."
+
+ADDITIONAL RULES:
+1. COMPACT code: minimize whitespace and comments.
+2. Use Korean UI text when user writes Korean.
+3. CRITICAL: There MUST be an empty line before \\\`\\\`\\\`html.
+4. Respond in the same language as the user. Make it visually polished.
+5. Do NOT include any other text outside the 3-step structure.
 
 ## CRITICAL DESIGN RULE — SIZE & LAYOUT:
 Your content is rendered inside a chat bubble in an iframe (100% width of bubble).
@@ -529,15 +542,20 @@ export default async function handler(req, res) {
       }
     }
 
-    // Now wait for interactive agent and send it
+    // Now wait for interactive agent and send 3-part output: intro → html → outro
     if (interactivePromise) {
       const interactiveResult = await interactivePromise;
       if (interactiveResult.success && interactiveResult.result) {
         const raw = interactiveResult.result;
         const fenceMatch = raw.match(/```html\s*\n([\s\S]*?)```/);
         if (fenceMatch) {
+          // STEP 1: Intro text (before the code fence)
+          const beforeFence = raw.slice(0, fenceMatch.index).trim();
+          if (beforeFence) sendSSE(res, 'content', beforeFence + '\n\n');
+          // STEP 2: Interactive HTML content
           const htmlCode = fenceMatch[1].trim();
           sendSSE(res, 'interactive_html', htmlCode);
+          // STEP 3: Outro text (after the code fence)
           const afterFence = raw.slice(raw.indexOf('```', fenceMatch.index + 3) + 3).trim();
           if (afterFence) sendSSE(res, 'content', '\n\n' + afterFence);
         } else {

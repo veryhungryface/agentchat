@@ -234,15 +234,20 @@ app.post('/api/chat', async (req, res) => {
     }
     t4();
 
-    // Now wait for interactive agent and send it
+    // Now wait for interactive agent and send 3-part output: intro → html → outro
     if (interactivePromise) {
       const interactiveResult = await interactivePromise;
       if (interactiveResult.success && interactiveResult.result) {
         const raw = interactiveResult.result;
         const fenceMatch = raw.match(/```html\s*\n([\s\S]*?)```/);
         if (fenceMatch) {
+          // STEP 1: Intro text (before the code fence)
+          const beforeFence = raw.slice(0, fenceMatch.index).trim();
+          if (beforeFence) sendSSE(res, 'content', beforeFence + '\n\n');
+          // STEP 2: Interactive HTML content
           const htmlCode = fenceMatch[1].trim();
           sendSSE(res, 'interactive_html', htmlCode);
+          // STEP 3: Outro text (after the code fence)
           const afterFence = raw.slice(raw.indexOf('```', fenceMatch.index + 3) + 3).trim();
           if (afterFence) sendSSE(res, 'content', '\n\n' + afterFence);
         } else {

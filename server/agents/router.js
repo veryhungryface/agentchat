@@ -38,7 +38,7 @@ CRITICAL routing rules (follow strictly):
 - "general" is ONLY for greetings and very simple chat. Any real question should go to a specialized agent.
 - Shopping/product/price queries mentioning a specific store → "browser"
 - Shopping/product queries WITHOUT a specific store → "research"
-- When "interactive" is selected, ALWAYS also include "general" — the general agent provides a text explanation while the interactive agent creates the visual. So: "suggestedAgents": ["interactive", "general"]
+- When "interactive" is selected, use ONLY "interactive" — it handles both text and visuals. So: "suggestedAgents": ["interactive"]
 - Other agents: use 1 agent normally. Use 2 only for genuinely multi-faceted requests.`,
       temperature: 0.2,
       maxTokens: 600,
@@ -48,9 +48,9 @@ CRITICAL routing rules (follow strictly):
     let suggestedAgents = (result.suggestedAgents || [result.category || 'general'])
       .filter((a) => validAgents.has(a));
 
-    // Interactive always needs general for text explanation
-    if (suggestedAgents.includes('interactive') && !suggestedAgents.includes('general')) {
-      suggestedAgents.push('general');
+    // Interactive runs alone — it provides its own text intro/outro
+    if (suggestedAgents.includes('interactive')) {
+      suggestedAgents = ['interactive'];
     }
 
     return {
