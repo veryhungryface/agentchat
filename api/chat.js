@@ -230,11 +230,13 @@ HTML+JS RULES:
 1. Self-contained: all CSS in <style>, all JS in <script>. NO external CDN/links EXCEPT KaTeX (see below).
 2. Must work in sandboxed iframe (no localStorage, no fetch).
 3. Modern CSS: flexbox, grid, transitions.
-4. **KaTeX EXCEPTION**: When rendering math formulas, you MUST use KaTeX CDN for beautiful LaTeX rendering:
+4. **KaTeX for math rendering**: When ANY math formula appears, include these 3 tags in <head>:
    \\\`<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">\\\`
-   \\\`<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>\\\`
-   Then render with: \\\`katex.render("LaTeX string", element, {displayMode:true})\\\`
-   Use KaTeX for ALL math expressions — formulas, variable labels, equations, fractions, greek letters, superscripts/subscripts.
+   \\\`<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>\\\`
+   \\\`<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]})"></script>\\\`
+   Then just write math with dollar-sign delimiters: inline \\\`$PV=nRT$\\\`, display \\\`$$E=mc^2$$\\\`.
+   Auto-render converts all \\\`$...$\\\` and \\\`$$...$$\\\` into beautiful rendered math.
+   ALWAYS use for: formulas, variable labels, greek letters (\\\`$\\\\alpha$\\\`), fractions (\\\`$\\\\frac{1}{f}$\\\`).
 
 ## UNIVERSAL RULES:
 1. Output ONE \\\`\\\`\\\`html code fence. Nothing else.
@@ -262,8 +264,8 @@ Control Panel (white bg) on top: formula display + parameter sliders with lock t
 Visualization Panel (#F8F8FA bg) below: interactive diagram that reacts to slider changes.
 
 ### CONTROL PANEL:
-1. Formula at top center using KaTeX: katex.render("PV = nRT", el, {displayMode:true}). Large ~24px via CSS. Color #333.
-2. One row per parameter: Label (KaTeX-rendered math symbol for proper italic/greek/subscripts) | Value (sans-serif 14px #333, 1 decimal) | Slider (track 4px #E0E0E0, thumb 18px circle white/#4A90D9) | Lock toggle (○/●)
+1. Formula at top center: write $$PV = nRT$$ in HTML — KaTeX auto-render handles it. Style: font-size ~24px, color #333, text-align center.
+2. One row per parameter: Label uses $P$, $V$, $\\theta$ etc. — auto-render makes them beautiful math | Value (sans-serif 14px #333, 1 decimal) | Slider (track 4px #E0E0E0, thumb 18px circle white/#4A90D9) | Lock toggle (○/●)
 3. Lock mechanism: locked(●)=constant. Dragging one unlocked slider auto-adjusts another unlocked param to maintain equality. Default lock one param.
 4. Real-time updates as slider drags.
 

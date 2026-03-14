@@ -40,11 +40,15 @@ HTML+JS RULES:
 1. Self-contained: all CSS in <style>, all JS in <script>. NO external CDN/links EXCEPT KaTeX (see below).
 2. Must work in sandboxed iframe (no localStorage, no fetch).
 3. Modern CSS: flexbox, grid, transitions, border-radius, shadows.
-4. **KaTeX EXCEPTION**: When rendering math formulas, you MUST use KaTeX CDN for beautiful LaTeX rendering:
+4. **KaTeX for math rendering**: When ANY math formula, equation, variable, or symbol appears, include these 3 tags in <head>:
    \`<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">\`
-   \`<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>\`
-   Then render with: \`katex.render("LaTeX string", element, {displayMode:true})\`
-   Use KaTeX for ALL math expressions — formulas, variable labels, equations, fractions, greek letters, superscripts/subscripts.
+   \`<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>\`
+   \`<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]})"></script>\`
+   Then just write math with dollar-sign delimiters in your HTML text:
+   - Inline math: \`$PV = nRT$\`, \`$\\theta$\`, \`$\\frac{1}{f}$\`
+   - Display math: \`$$E = mc^2$$\`
+   KaTeX auto-render will convert ALL \`$...$\` and \`$$...$$\` into beautiful rendered math.
+   ALWAYS use this for: formulas, variable labels, equations, fractions, greek letters (\`$\\alpha$\`, \`$\\theta$\`), superscripts/subscripts (\`$x^2$\`, \`$a_1$\`).
 
 ## UNIVERSAL RULES:
 1. Output the code fence, then brief usage tips. Structure:
@@ -98,9 +102,9 @@ When the user asks to explore, visualize, or understand a formula/equation/law (
 \`\`\`
 
 ### CONTROL PANEL RULES:
-1. **Formula display** at top center using KaTeX: \`katex.render("PV = nRT", el, {displayMode:true})\`. Large size (~24px via CSS scaling). Color #333.
+1. **Formula display** at top center: write \`$$PV = nRT$$\` in HTML — KaTeX auto-render handles it. Style the container: font-size ~24px, color #333, text-align center, margin 16px 0.
 2. **One row per parameter** with these elements left-to-right:
-   - Label: rendered with KaTeX for proper math styling (e.g. \`katex.render("P", labelEl)\` for italic serif math symbols, greek letters, subscripts)
+   - Label: use \`$P$\`, \`$V$\`, \`$\\theta$\` etc. in HTML — auto-render makes them beautiful italic math symbols
    - Current value: sans-serif, 14px, #333, 1 decimal place
    - Slider: \`<input type="range">\` spanning most of the row. Track: 4px height, #E0E0E0. Thumb: 18px circle, white fill, #4A90D9 border.
    - Lock checkbox: circular toggle (○ unlocked / ● locked) on the far right
