@@ -97,10 +97,10 @@ let previewIdCounter = 0;
 function HtmlPreview({ code, seamless = false }) {
   const iframeRef = useRef(null);
   const idRef = useRef(`preview-${++previewIdCounter}`);
-  const [height, setHeight] = useState(seamless ? 500 : 300);
+  const [height, setHeight] = useState(0);
+  const [loaded, setLoaded] = useState(false);
 
   const srcdoc = useMemo(() => {
-    // Inject the unique id into the resize script so messages can be matched
     const src = buildSrcdoc(code);
     return src.replace('__iframeHeight:', `__iframeId:"${idRef.current}",__iframeHeight:`);
   }, [code]);
@@ -110,6 +110,7 @@ function HtmlPreview({ code, seamless = false }) {
     const handler = (e) => {
       if (e.data && e.data.__iframeId === id && typeof e.data.__iframeHeight === 'number') {
         setHeight(e.data.__iframeHeight);
+        setLoaded(true);
       }
     };
     window.addEventListener('message', handler);
@@ -122,7 +123,10 @@ function HtmlPreview({ code, seamless = false }) {
       srcDoc={srcdoc}
       sandbox="allow-scripts"
       className={seamless ? 'interactive-iframe' : 'md-preview-iframe'}
-      style={{ height: `${height}px` }}
+      style={{
+        height: loaded ? `${height}px` : (seamless ? '200px' : '300px'),
+        transition: loaded ? 'height 0.2s ease' : 'none',
+      }}
       title="HTML 미리보기"
       scrolling="no"
     />

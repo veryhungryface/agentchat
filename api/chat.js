@@ -85,6 +85,10 @@ Rules:
     const agents = Array.isArray(parsed.suggestedAgents) && parsed.suggestedAgents.length > 0
       ? parsed.suggestedAgents
       : ['general'];
+    // Interactive always needs general for text explanation
+    if (agents.includes('interactive') && !agents.includes('general')) {
+      agents.push('general');
+    }
     return { suggestedAgents: agents, reasoning: parsed.reasoning || '' };
   } catch {
     return { suggestedAgents: ['general'], reasoning: 'Classification failed, using general' };
@@ -335,13 +339,29 @@ export default async function handler(req, res) {
       }
     }
 
-    // Interactive agent: pass through as interactive_html (rendered directly, not as code block)
+    // Interactive agent: stream text explanation first, then send interactive HTML
     const interactiveResult = successfulResults.find((r) =>
       r.agentName === '인터랙티브 에이전트' || r.agentName?.includes('인터랙티브'));
-    if (interactiveResult && successfulResults.length === 1) {
+    if (interactiveResult) {
+      const textResults = successfulResults.filter((r) => r !== interactiveResult);
       sendSSE(res, 'status', 'streaming');
+      if (textResults.length > 0) {
+        const agentContext = textResults.map((r) => r.result).join('\n\n---\n\n');
+        const textResult = streamText({
+          model: getModel(mainModel),
+          system: `You are a helpful AI assistant. Below is reference information:\n\n<reference>\n${agentContext}\n</reference>\n\nPresent the information naturally as a brief introduction/explanation. Keep it SHORT (2-4 sentences max).\nDo NOT mention agents or internal processing. Do NOT include URLs or source sections.\nRespond in the same language as the user.`,
+          messages: apiMessages,
+          temperature: 0.7,
+          maxTokens: 512,
+        });
+        let fullText = '';
+        for await (const chunk of textResult.textStream) {
+          fullText += chunk;
+          sendSSE(res, 'content', chunk);
+        }
+      }
       sendSSE(res, 'interactive_html', interactiveResult.result);
-      const followUps = await generateFollowUps(interactiveResult.result, lastUserMsg, fastModel);
+      const followUps = await generateFollowUps(lastUserMsg, lastUserMsg, fastModel);
       if (followUps.length > 0) sendSSE(res, 'follow_ups', followUps);
       res.write('data: [DONE]\n\n');
       return res.end();

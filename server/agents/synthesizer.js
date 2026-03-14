@@ -20,10 +20,29 @@ export async function* synthesizeResults(agentResults, messages, model) {
     return;
   }
 
-  // Interactive agent: pass through directly — HTML code blocks must not be rewritten
+  // Interactive agent: always pass through the HTML separately
   const interactiveResult = successfulResults.find((r) =>
     r.agentName === '인터랙티브 에이전트' || r.agentName?.includes('인터랙티브'));
-  if (interactiveResult && successfulResults.length === 1) {
+  if (interactiveResult) {
+    // Remove interactive result from synthesis — it will be sent as interactive_html
+    const textResults = successfulResults.filter((r) => r !== interactiveResult);
+    if (textResults.length > 0) {
+      // Synthesize text explanation from other agents, then append interactive HTML
+      const agentContext = textResults.map((r) => r.result).join('\n\n---\n\n');
+      yield* llmStream(model, messages, {
+        system: `You are a helpful AI assistant. Below is reference information:
+
+<reference>
+${agentContext}
+</reference>
+
+Present the information naturally as a brief introduction/explanation. Keep it SHORT (2-4 sentences max).
+Do NOT mention agents or internal processing. Do NOT include URLs or source sections.
+Respond in the same language as the user.`,
+        temperature: 0.7,
+        maxTokens: 512,
+      });
+    }
     yield { __interactive: true, content: interactiveResult.result };
     return;
   }

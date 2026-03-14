@@ -198,8 +198,7 @@ app.post('/api/chat', async (req, res) => {
       // Interactive agent: send as instant content (no typewriter)
       if (chunk && typeof chunk === 'object' && chunk.__interactive) {
         sendSSE(res, 'interactive_html', chunk.content);
-        fullAnswer = chunk.content;
-        break;
+        continue;
       }
       fullAnswer += chunk;
       sendSSE(res, 'content', chunk);
