@@ -137,24 +137,48 @@ app.post('/api/chat', async (req, res) => {
     sendSSE(res, 'status', 'executing');
     const t3 = timer('agents');
 
-    const agentResults = await dispatchAgents(agentList, apiMessages, mainModel, fastModel, {
-      onAgentStart: (label, type) => {
-        sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${label} 실행 중...` });
-        if (type === 'research' || type === 'browser') {
-          sendSSE(res, 'status', 'searching');
-        }
-      },
-      onAgentComplete: (label, success) => {
-        sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: success ? `${label} 완료 ✓` : `${label} 실패 ✗` });
-      },
-      onScreenshot: (screenshot) => {
-        sendSSE(res, 'browser_screenshot', screenshot);
-      },
-    });
+    // If interactive agent is included, run it separately so we can
+    // stream text results immediately without waiting for it
+    const hasInteractive = agentList.includes('interactive');
+    const textAgentList = hasInteractive ? agentList.filter((a) => a !== 'interactive') : agentList;
+
+    let interactivePromise = null;
+    if (hasInteractive) {
+      sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 실행 중...` });
+      interactivePromise = import('./server/agents/specialized/interactive.js')
+        .then((mod) => mod.runInteractiveAgent(apiMessages, mainModel))
+        .then((result) => {
+          sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 완료 ✓` });
+          return { agentName: AGENT_LABELS.interactive, result, success: true };
+        })
+        .catch((err) => {
+          console.error('[pipeline] Interactive agent failed:', err.message);
+          sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 실패 ✗` });
+          return { agentName: AGENT_LABELS.interactive, result: '', success: false, error: err.message };
+        });
+    }
+
+    // Dispatch text agents (general, research, etc.) — these complete fast
+    const agentResults = textAgentList.length > 0
+      ? await dispatchAgents(textAgentList, apiMessages, mainModel, fastModel, {
+          onAgentStart: (label, type) => {
+            sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${label} 실행 중...` });
+            if (type === 'research' || type === 'browser') {
+              sendSSE(res, 'status', 'searching');
+            }
+          },
+          onAgentComplete: (label, success) => {
+            sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: success ? `${label} 완료 ✓` : `${label} 실패 ✗` });
+          },
+          onScreenshot: (screenshot) => {
+            sendSSE(res, 'browser_screenshot', screenshot);
+          },
+        })
+      : [];
     t3();
 
-    // Fallback: if all agents failed, try general agent directly
-    const allFailed = agentResults.every((r) => !r.success || !r.result);
+    // Fallback: if all text agents failed, try general agent directly
+    const allFailed = agentResults.length > 0 && agentResults.every((r) => !r.success || !r.result);
     if (allFailed) {
       const errors = agentResults.map((r) => `${r.agentName}: ${r.error}`).join(', ');
       console.error('[pipeline] All agents failed:', errors);
@@ -166,9 +190,11 @@ app.post('/api/chat', async (req, res) => {
         sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: '일반 모드 폴백 완료 ✓' });
       } catch (fallbackErr) {
         console.error('[pipeline] Fallback also failed:', fallbackErr.message);
-        sendSSE(res, 'content', `오류가 발생했습니다: ${errors}`);
-        res.write('data: [DONE]\n\n');
-        return res.end();
+        if (!interactivePromise) {
+          sendSSE(res, 'content', `오류가 발생했습니다: ${errors}`);
+          res.write('data: [DONE]\n\n');
+          return res.end();
+        }
       }
     }
 
@@ -178,15 +204,11 @@ app.post('/api/chat', async (req, res) => {
       const urlMatches = researchResult.result.match(/https?:\/\/[^\s)]+/g) || [];
       const sources = urlMatches.slice(0, 5).map((url) => ({ url, title: url }));
       if (sources.length > 0) {
-        sendSSE(res, 'search', {
-          query: lastUserMsg,
-          results: sources,
-          round: 1,
-        });
+        sendSSE(res, 'search', { query: lastUserMsg, results: sources, round: 1 });
       }
     }
 
-    // ── Stage 4-5: Synthesis + Streaming ──────────────────────────────────────
+    // ── Stage 4-5: Synthesis + Streaming (text first, interactive later) ─────
     sendSSE(res, 'status', 'synthesize');
     sendSSE(res, 'thinking_update', { stage: 'synthesize', text: '결과 종합 중...' });
     const t4 = timer('synthesis');
@@ -194,22 +216,41 @@ app.post('/api/chat', async (req, res) => {
     sendSSE(res, 'status', 'streaming');
     let fullAnswer = '';
     let followUpPromise = null;
-    for await (const chunk of synthesizeResults(agentResults, apiMessages, mainModel)) {
-      // Interactive agent: send as instant content (no typewriter)
-      if (chunk && typeof chunk === 'object' && chunk.__interactive) {
-        sendSSE(res, 'interactive_html', chunk.content);
-        continue;
-      }
-      fullAnswer += chunk;
-      sendSSE(res, 'content', chunk);
-      // Start follow-up generation early once we have enough content
-      if (!followUpPromise && fullAnswer.length > 200) {
-        followUpPromise = generateFollowUps(fullAnswer, lastUserMsg, fastModel);
+
+    // Stream text agent results immediately (don't wait for interactive)
+    const successfulTextResults = agentResults.filter((r) => r.success && r.result);
+    if (successfulTextResults.length > 0) {
+      for await (const chunk of synthesizeResults(agentResults, apiMessages, mainModel)) {
+        if (chunk && typeof chunk === 'object' && chunk.__interactive) {
+          sendSSE(res, 'interactive_html', chunk.content);
+          continue;
+        }
+        fullAnswer += chunk;
+        sendSSE(res, 'content', chunk);
+        if (!followUpPromise && fullAnswer.length > 200) {
+          followUpPromise = generateFollowUps(fullAnswer, lastUserMsg, fastModel);
+        }
       }
     }
     t4();
 
-    // If answer was too short to trigger early generation, start now
+    // Now wait for interactive agent and send it
+    if (interactivePromise) {
+      const interactiveResult = await interactivePromise;
+      if (interactiveResult.success && interactiveResult.result) {
+        const raw = interactiveResult.result;
+        const fenceMatch = raw.match(/```html\s*\n([\s\S]*?)```/);
+        if (fenceMatch) {
+          const htmlCode = fenceMatch[1].trim();
+          sendSSE(res, 'interactive_html', htmlCode);
+          const afterFence = raw.slice(raw.indexOf('```', fenceMatch.index + 3) + 3).trim();
+          if (afterFence) sendSSE(res, 'content', '\n\n' + afterFence);
+        } else {
+          sendSSE(res, 'interactive_html', raw);
+        }
+      }
+    }
+
     if (!followUpPromise) {
       followUpPromise = generateFollowUps(fullAnswer, lastUserMsg, fastModel);
     }

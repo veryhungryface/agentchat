@@ -446,8 +446,30 @@ export default async function handler(req, res) {
 
     // ── Stage 3: Agent Execution ────────────────────────────────────────
     sendSSE(res, 'status', 'executing');
+
+    // If interactive agent is included, run it separately so we can
+    // stream text results immediately without waiting for it
+    const hasInteractive = agentList.includes('interactive');
+    const textAgentList = hasInteractive ? agentList.filter((a) => a !== 'interactive') : agentList;
+
+    let interactivePromise = null;
+    if (hasInteractive) {
+      sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 실행 중...` });
+      interactivePromise = runAgent('interactive', apiMessages, mainModel)
+        .then((result) => {
+          sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 완료 ✓` });
+          return { result, success: true };
+        })
+        .catch((err) => {
+          console.error('[api/chat] Interactive agent error:', err.message);
+          sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 실패 ✗` });
+          return { result: '', success: false };
+        });
+    }
+
+    // Dispatch text agents — these complete fast
     const agentResults = await Promise.all(
-      agentList.map(async (agentType) => {
+      textAgentList.map(async (agentType) => {
         const label = AGENT_LABELS[agentType];
         sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${label} 실행 중...` });
         try {
@@ -456,102 +478,77 @@ export default async function handler(req, res) {
           return { agentName: label, result, success: true };
         } catch (err) {
           console.error(`[api/chat] ${label} error:`, err.message);
-          sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${label} 실패: ${err.message.slice(0, 80)}` });
+          sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${label} 실패 ✗` });
           return { agentName: label, result: '', success: false, error: err.message };
         }
       }),
     );
 
-    // ── Fallback: if all agents failed, try general directly ─────────
+    // Fallback
     let successfulResults = agentResults.filter((r) => r.success && r.result);
-    if (successfulResults.length === 0) {
-      const errors = agentResults.map((r) => `${r.agentName}: ${r.error}`).join(', ');
-      console.error('[api/chat] All agents failed:', errors);
+    if (successfulResults.length === 0 && textAgentList.length > 0) {
       sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: '에이전트 실패 — 일반 모드로 재시도 중...' });
       try {
         const result = await runAgent('general', apiMessages, fastModel);
         agentResults.push({ agentName: '일반 에이전트 (폴백)', result, success: true });
         successfulResults = agentResults.filter((r) => r.success && r.result);
-      } catch (fallbackErr) {
-        sendSSE(res, 'content', `오류가 발생했습니다: ${errors}`);
-        res.write('data: [DONE]\n\n');
-        return res.end();
+      } catch {
+        if (!interactivePromise) {
+          sendSSE(res, 'content', '오류가 발생했습니다.');
+          res.write('data: [DONE]\n\n');
+          return res.end();
+        }
       }
     }
 
-    // Interactive agent: stream text explanation first, then send interactive HTML
-    const interactiveResult = successfulResults.find((r) =>
-      r.agentName === '인터랙티브 에이전트' || r.agentName?.includes('인터랙티브'));
-    if (interactiveResult) {
-      const textResults = successfulResults.filter((r) => r !== interactiveResult);
-      sendSSE(res, 'status', 'streaming');
-      if (textResults.length > 0) {
-        const agentContext = textResults.map((r) => r.result).join('\n\n---\n\n');
-        const textResult = streamText({
-          model: getModel(mainModel),
-          system: `You are a helpful AI assistant. Below is reference information:\n\n<reference>\n${agentContext}\n</reference>\n\nPresent the information naturally as a brief introduction/explanation. Keep it SHORT (2-4 sentences max).\nDo NOT mention agents or internal processing. Do NOT include URLs or source sections.\nRespond in the same language as the user.`,
-          messages: apiMessages,
-          temperature: 0.7,
-          maxTokens: 512,
-        });
-        let fullText = '';
-        for await (const chunk of textResult.textStream) {
-          fullText += chunk;
-          sendSSE(res, 'content', chunk);
-        }
-      }
-      // Split interactive result: code fence → interactive_html, trailing text → content
-      const interactiveRaw = interactiveResult.result || '';
-      const fenceMatch = interactiveRaw.match(/```html\s*\n([\s\S]*?)```/);
-      if (fenceMatch) {
-        const htmlCode = fenceMatch[1].trim();
-        const afterFence = interactiveRaw.slice(interactiveRaw.indexOf('```', fenceMatch.index + 3) + 3).trim();
-        sendSSE(res, 'interactive_html', htmlCode);
-        if (afterFence) {
-          sendSSE(res, 'content', '\n\n' + afterFence);
-        }
-      } else {
-        sendSSE(res, 'interactive_html', interactiveRaw);
-      }
-      const followUps = await generateFollowUps(lastUserMsg, lastUserMsg, fastModel);
-      if (followUps.length > 0) sendSSE(res, 'follow_ups', followUps);
-      res.write('data: [DONE]\n\n');
-      return res.end();
-    }
-
+    // ── Stream text results immediately (don't wait for interactive) ──
     sendSSE(res, 'status', 'synthesize');
     sendSSE(res, 'thinking_update', { stage: 'synthesize', text: '결과 종합 중...' });
-
     sendSSE(res, 'status', 'streaming');
-    const system = buildSynthesisSystem(successfulResults);
 
     let fullAnswer = '';
     let followUpPromise = null;
 
-    const result = streamText({
-      model: getModel(mainModel),
-      system,
-      messages: apiMessages,
-      temperature: 0.7,
-      maxTokens: 2048,
-    });
+    if (successfulResults.length > 0) {
+      const system = buildSynthesisSystem(successfulResults);
+      const textStream = streamText({
+        model: getModel(mainModel),
+        system,
+        messages: apiMessages,
+        temperature: 0.7,
+        maxTokens: 2048,
+      });
+      for await (const chunk of textStream.textStream) {
+        fullAnswer += chunk;
+        sendSSE(res, 'content', chunk);
+        if (!followUpPromise && fullAnswer.length > 200) {
+          followUpPromise = generateFollowUps(fullAnswer, lastUserMsg, fastModel);
+        }
+      }
+    }
 
-    for await (const chunk of result.textStream) {
-      fullAnswer += chunk;
-      sendSSE(res, 'content', chunk);
-      if (!followUpPromise && fullAnswer.length > 200) {
-        followUpPromise = generateFollowUps(fullAnswer, lastUserMsg, fastModel);
+    // Now wait for interactive agent and send it
+    if (interactivePromise) {
+      const interactiveResult = await interactivePromise;
+      if (interactiveResult.success && interactiveResult.result) {
+        const raw = interactiveResult.result;
+        const fenceMatch = raw.match(/```html\s*\n([\s\S]*?)```/);
+        if (fenceMatch) {
+          const htmlCode = fenceMatch[1].trim();
+          sendSSE(res, 'interactive_html', htmlCode);
+          const afterFence = raw.slice(raw.indexOf('```', fenceMatch.index + 3) + 3).trim();
+          if (afterFence) sendSSE(res, 'content', '\n\n' + afterFence);
+        } else {
+          sendSSE(res, 'interactive_html', raw);
+        }
       }
     }
 
     if (!followUpPromise) {
       followUpPromise = generateFollowUps(fullAnswer, lastUserMsg, fastModel);
     }
-
     const followUps = await followUpPromise;
-    if (followUps.length > 0) {
-      sendSSE(res, 'follow_ups', followUps);
-    }
+    if (followUps.length > 0) sendSSE(res, 'follow_ups', followUps);
 
     res.write('data: [DONE]\n\n');
   } catch (err) {
