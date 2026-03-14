@@ -77,6 +77,7 @@ const MODEL_GROUPS = [
       'gpt-5.4',
       'gpt-5.4-pro',
       'gpt-5.2',
+      'gpt-5.1-mini',
       'gpt-5-mini',
       'gpt-5-nano',
       'gpt-4.1',
@@ -105,7 +106,7 @@ const MODEL_GROUPS = [
 ];
 
 const MODEL_IDS = new Set(MODEL_GROUPS.flatMap((group) => group.models));
-const DEFAULT_CHAT_MODEL = 'gpt-5-mini';
+const DEFAULT_CHAT_MODEL = 'gpt-5.1-mini';
 
 function truncateLabel(text, max = 26) {
   if (!text) return '';

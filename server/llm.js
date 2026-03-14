@@ -39,7 +39,7 @@ function detectProvider(model) {
 }
 
 // ── Reasoning model handling ─────────────────────────────────────────────────
-const REASONING_MODELS = new Set(['gpt-5-nano', 'o1', 'o1-mini', 'o1-preview', 'o3', 'o3-mini', 'o4-mini']);
+const REASONING_MODELS = new Set(['o1', 'o1-mini', 'o1-preview', 'o3', 'o3-mini', 'o4-mini']);
 const MIN_REASONING_TOKENS = 2000;
 
 function isReasoningModel(model) {

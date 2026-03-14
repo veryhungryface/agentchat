@@ -48,8 +48,8 @@ function sendSSE(res, type, data) {
 }
 
 // ── Model defaults ───────────────────────────────────────────────────────────
-const DEFAULT_MAIN_MODEL = 'gpt-5-mini';
-const DEFAULT_FAST_MODEL = 'gpt-5-nano';
+const DEFAULT_MAIN_MODEL = 'gpt-5.1-mini';
+const DEFAULT_FAST_MODEL = 'gpt-5.1-mini';
 
 // ── Follow-up generation ─────────────────────────────────────────────────────
 async function generateFollowUps(answer, userQuery, model) {
