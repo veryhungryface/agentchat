@@ -18,14 +18,14 @@ const openai = process.env.OPENAI_API_KEY
   ? createOpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
-const DEFAULT_MODEL = 'gpt-5.1-mini';
+const DEFAULT_MODEL = 'gpt-5-mini';
 
 function getModel(name) {
   if (name?.startsWith('gemini')) return google?.(name) ?? google?.(DEFAULT_MODEL);
   if (name?.startsWith('gpt') || name?.startsWith('o1') || name?.startsWith('o3') || name?.startsWith('o4')) {
     return openai?.(name);
   }
-  return google?.(name ?? DEFAULT_MODEL) ?? openai?.(name ?? 'gpt-5.1-mini');
+  return google?.(name ?? DEFAULT_MODEL) ?? openai?.(name ?? 'gpt-5-mini');
 }
 
 // ── SSE helper ──────────────────────────────────────────────────────────────
