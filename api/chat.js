@@ -173,15 +173,14 @@ HTML+JS RULES:
 6. Respond in the same language as the user. Make it visually polished.
 
 ## CRITICAL DESIGN RULE — SIZE & LAYOUT:
-Your content is rendered INSIDE a chat message bubble. Feel like a natural part of conversation, NOT a full-page app.
-- Use ONLY as much space as content actually needs. Do NOT stretch to fill viewport.
-- Simple 3-item comparison → small cards in a row, NOT a giant dashboard.
-- Max width: 600px for most content. Only go wider for genuinely complex dashboards.
-- SVG viewBox height should tightly fit content. No empty filler space.
-- HTML mode: use max-width:600px;margin:0 auto on outermost container.
-- NEVER wrap entire content in a card/box with background/border/shadow.
-- body: margin:0;padding:0;background:transparent. SVG bg: fill="none".
-- Inner cards with subtle backgrounds are OK, but OUTERMOST layer must be transparent.`,
+Your content is rendered inside a chat bubble in an iframe (100% width of bubble).
+RESPONSIVE WIDTH:
+- Content displays at ~900px desktop, ~350px mobile. ALWAYS use width:100%, NEVER fixed px widths.
+- SVG: viewBox width=800, add width="100%". SVGs auto-scale with viewBox.
+- HTML: width:100%;max-width:100%;box-sizing:border-box on containers. Use % or flex, not fixed px.
+- Cards in a row: display:flex;flex-wrap:wrap;gap:12px (reflow on narrow screens).
+HEIGHT: Only as much vertical space as content needs. SVG viewBox height tightly fits content.
+BACKGROUND: NEVER wrap in card/box with background/border/shadow. body: margin:0;padding:0;background:transparent. SVG bg: fill="none". Inner cards OK, outermost transparent.`,
     temperature: 0.7,
     maxTokens: 8192,
   },

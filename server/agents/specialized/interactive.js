@@ -13,7 +13,7 @@ OUTPUT FORMAT for SVG mode:
 <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{margin:0;padding:0;background:transparent;display:flex;justify-content:center}</style>
 </head><body>
-<svg viewBox="0 0 WIDTH HEIGHT" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 800 HEIGHT" width="100%" xmlns="http://www.w3.org/2000/svg">
   <style>/* CSS here */</style>
   <!-- SVG content -->
 </svg>
@@ -52,23 +52,26 @@ HTML+JS RULES:
 8. Make it visually polished — users see this rendered live in chat.
 
 ## CRITICAL DESIGN RULE — SIZE & LAYOUT:
-Your content is rendered INSIDE a chat message bubble. It should feel like a natural part of the conversation, NOT a full-page app.
+Your content is rendered inside a chat message bubble in an iframe. The iframe is always 100% width of the chat bubble.
 
-SIZE PRINCIPLES:
-- Use ONLY as much space as the content actually needs. Do NOT stretch to fill the viewport.
-- A simple 3-item comparison → small cards in a row. NOT a giant full-width dashboard.
-- A single chart → moderate size. NOT a sprawling multi-section page.
-- Think COMPACT and FOCUSED. White space is good, but empty filler space is bad.
-- Max width: 600px for most content. Only go wider for genuinely complex dashboards.
-- SVG viewBox height should tightly fit the content. Do NOT pad with empty space.
-- For HTML mode: use \`max-width:600px;margin:0 auto\` on the outermost container.
-- Prefer horizontal card layouts (flex row) over vertical stacking when items are few (2-4 items).
+RESPONSIVE WIDTH:
+- Your content will be displayed at different widths: ~900px on desktop, ~350px on mobile.
+- ALWAYS use \`width:100%\` on the outermost container. NEVER use fixed pixel widths (e.g. 600px, 800px).
+- For SVG: set viewBox width to 800. The SVG will auto-scale to fit the container because SVGs are responsive by default with viewBox.
+- For HTML: use \`width:100%;max-width:100%;box-sizing:border-box\` on containers.
+- Use \`%\` or \`flex\` for child element widths, not fixed px.
+- Cards in a row: use \`display:flex;flex-wrap:wrap;gap:12px\` so they reflow on narrow screens.
 
-BACKGROUND PRINCIPLES:
+HEIGHT:
+- Use ONLY as much vertical space as the content needs. Do NOT pad with empty space.
+- SVG viewBox height should tightly fit content (no unnecessary bottom padding).
+- Think COMPACT — a simple comparison needs a small layout, not a sprawling dashboard.
+
+BACKGROUND:
 - NEVER wrap entire content in a card/box/container with its own background/border/shadow.
 - body style: \`margin:0;padding:0;background:transparent\`
 - SVG background: \`fill="none"\` or \`fill="transparent"\`, NOT \`fill="#fafafa"\`.
-- Individual inner cards/elements with subtle backgrounds are OK.
+- Individual inner cards with subtle backgrounds are OK.
 - The OUTERMOST layer must be transparent/borderless — it sits inside a chat bubble.`;
 
 export async function runInteractiveAgent(messages, model) {
