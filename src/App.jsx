@@ -71,17 +71,6 @@ const DEFAULT_HISTORY = [
 
 const MODEL_GROUPS = [
   {
-    id: 'gemini',
-    label: 'Gemini',
-    models: [
-      'gemini-3-flash-preview',
-      'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
-      'gemini-flash-latest',
-      'gemini-flash-lite-latest',
-    ],
-  },
-  {
     id: 'openai',
     label: 'OpenAI',
     models: [
@@ -91,25 +80,23 @@ const MODEL_GROUPS = [
       'gpt-4.1',
       'gpt-4.1-mini',
       'gpt-4.1-nano',
+      'gpt-4o',
+      'gpt-4o-mini',
+      'o4-mini',
     ],
   },
   {
-    id: 'glm',
-    label: 'GLM',
+    id: 'gemini',
+    label: 'Gemini',
     models: [
-      'glm-5',
-      'glm-4.7',
-      'glm-4.7-flash',
-      'glm-4.6',
-      'glm-4.5',
-      'glm-4.5-air',
-      'glm-4.5-flash',
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
     ],
   },
 ];
 
 const MODEL_IDS = new Set(MODEL_GROUPS.flatMap((group) => group.models));
-const DEFAULT_CHAT_MODEL = 'gpt-5.2';
+const DEFAULT_CHAT_MODEL = 'gpt-4o-mini';
 
 function truncateLabel(text, max = 26) {
   if (!text) return '';
@@ -1195,6 +1182,20 @@ function App() {
               updateLatestAssistant((assistant) => ({
                 ...assistant,
                 followUps: normalizeFollowUps(parsed.data),
+              }));
+              continue;
+            }
+
+            if (parsed.type === 'interactive_html') {
+              const raw = parsed.data || '';
+              const fenceMatch = raw.match(/```html\s*\n([\s\S]*?)```/);
+              const htmlCode = fenceMatch ? fenceMatch[1].trim() : raw;
+              const desc = fenceMatch ? raw.slice(0, raw.indexOf('```')).trim() : '';
+              displayedRef.current = desc || ' ';
+              updateLatestAssistant((a) => ({
+                ...a,
+                content: desc || '',
+                interactiveHtml: htmlCode,
               }));
               continue;
             }

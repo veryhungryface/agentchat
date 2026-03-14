@@ -17,19 +17,24 @@ Available agents:
 - "coding": Code writing, debugging, algorithms, architecture, programming questions
 - "math": Math problems, calculations, statistics, numerical analysis
 - "creative": Creative writing, brainstorming, storytelling, poetry, marketing copy
+- "interactive": Requests to CREATE something visual, interactive, or runnable — "만들어줘", "보여줘", "그려줘", "시각화", games, charts, graphs, infographics, dashboards, timelines, diagrams, animations, calculators, visualizations, simulations, interactive demos, SVG, HTML/CSS/JS demos, web components, UI prototypes
 
 Respond with JSON:
 {
-  "category": "general" | "research" | "browser" | "coding" | "math" | "creative",
+  "category": "general" | "research" | "browser" | "coding" | "math" | "creative" | "interactive",
   "complexity": "simple" | "complex",
   "suggestedAgents": ["agent1"],
   "reasoning": "brief explanation"
 }
 
 CRITICAL routing rules (follow strictly):
+- If the user asks to CREATE/BUILD/MAKE something visual or interactive (게임, 차트, 애니메이션, 계산기, 시뮬레이션, 시각화, 타이머, 퀴즈, 그래프, 인포그래픽, 대시보드, 타임라인, 다이어그램, SVG 등) → "interactive"
+- If the user wants to SEE or PREVIEW something rendered in the chat → "interactive"
+- If the user asks to DRAW, VISUALIZE, or DIAGRAM something → "interactive"
 - If the user mentions a specific website/service name (쿠팡, 네이버, 11번가, Amazon, etc.) and wants to search/browse/interact with it → "browser"
 - If the user wants to log in, test a site, click menus, scrape product lists → "browser"
 - If the user asks a factual question without mentioning a specific site → "research"
+- If the user asks about code concepts, debugging, algorithms (NOT creating visual output) → "coding"
 - "general" is ONLY for greetings and very simple chat. Any real question should go to a specialized agent.
 - Shopping/product/price queries mentioning a specific store → "browser"
 - Shopping/product queries WITHOUT a specific store → "research"
@@ -38,7 +43,7 @@ CRITICAL routing rules (follow strictly):
       maxTokens: 600,
     });
 
-    const validAgents = new Set(['general', 'research', 'browser', 'coding', 'math', 'creative']);
+    const validAgents = new Set(['general', 'research', 'browser', 'coding', 'math', 'creative', 'interactive']);
     const suggestedAgents = (result.suggestedAgents || [result.category || 'general'])
       .filter((a) => validAgents.has(a));
 

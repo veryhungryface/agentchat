@@ -9,6 +9,7 @@ const AGENT_LOADERS = {
   creative: () => import('./specialized/creative.js').then((m) => m.runCreativeAgent),
   general: () => import('./specialized/general.js').then((m) => m.runGeneralAgent),
   browser: () => import('./specialized/browser.js').then((m) => m.runBrowserAgent),
+  interactive: () => import('./specialized/interactive.js').then((m) => m.runInteractiveAgent),
 };
 
 const AGENT_LABELS = {
@@ -18,6 +19,7 @@ const AGENT_LABELS = {
   creative: '크리에이티브 에이전트',
   general: '일반 에이전트',
   browser: '브라우저 에이전트',
+  interactive: '인터랙티브 에이전트',
 };
 
 /**

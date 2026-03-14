@@ -48,8 +48,8 @@ function sendSSE(res, type, data) {
 }
 
 // ── Model defaults ───────────────────────────────────────────────────────────
-const DEFAULT_MAIN_MODEL = 'gemini-3-flash-preview';
-const DEFAULT_FAST_MODEL = 'gemini-3-flash-preview';
+const DEFAULT_MAIN_MODEL = 'gpt-4o-mini';
+const DEFAULT_FAST_MODEL = 'gpt-4.1-nano';
 
 // ── Follow-up generation ─────────────────────────────────────────────────────
 async function generateFollowUps(answer, userQuery, model) {
@@ -195,6 +195,12 @@ app.post('/api/chat', async (req, res) => {
     let fullAnswer = '';
     let followUpPromise = null;
     for await (const chunk of synthesizeResults(agentResults, apiMessages, mainModel)) {
+      // Interactive agent: send as instant content (no typewriter)
+      if (chunk && typeof chunk === 'object' && chunk.__interactive) {
+        sendSSE(res, 'interactive_html', chunk.content);
+        fullAnswer = chunk.content;
+        break;
+      }
       fullAnswer += chunk;
       sendSSE(res, 'content', chunk);
       // Start follow-up generation early once we have enough content

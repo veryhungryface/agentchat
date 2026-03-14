@@ -18,7 +18,7 @@ const openai = process.env.OPENAI_API_KEY
   ? createOpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
-const DEFAULT_MODEL = 'gemini-2.0-flash';
+const DEFAULT_MODEL = 'gpt-4o-mini';
 
 function getModel(name) {
   if (name?.startsWith('gemini')) return google?.(name) ?? google?.(DEFAULT_MODEL);
@@ -63,14 +63,16 @@ async function classifyQuery(query, model) {
       model: getModel(model),
       system: `You are a query classifier. Respond with JSON:
 {
-  "category": "general"|"research"|"coding"|"math"|"creative",
+  "category": "general"|"research"|"coding"|"math"|"creative"|"interactive",
   "suggestedAgents": ["agent1"],
   "reasoning": "why"
 }
-Available agents: "general", "research", "coding", "math", "creative".
+Available agents: "general", "research", "coding", "math", "creative", "interactive".
 Rules:
+- Creating something visual/interactive (games, charts, animations, calculators, visualizations, demos, graphs, infographics, dashboards, timelines, diagrams, SVG, "그려줘", "시각화") → "interactive"
+- Drawing, visualizing, or diagramming something → "interactive"
 - Factual/current events → "research"
-- Code/debugging → "coding"
+- Code concepts/debugging/algorithms (NOT visual output) → "coding"
 - Math/statistics → "math"
 - Creative writing → "creative"
 - Simple greetings → "general"
@@ -96,6 +98,7 @@ const AGENT_LABELS = {
   math: '수학 에이전트',
   creative: '크리에이티브 에이전트',
   general: '일반 에이전트',
+  interactive: '인터랙티브 에이전트',
 };
 
 const AGENT_PROMPTS = {
@@ -123,6 +126,53 @@ const AGENT_PROMPTS = {
     system: 'You are a creative specialist. Be imaginative and original. Adapt tone to the request. Respond in the same language as the user.',
     temperature: 0.8,
     maxTokens: 4096,
+  },
+  interactive: {
+    system: `You are a visual & interactive content creator. You render content directly in the user's chat.
+
+## MODE SELECTION — choose ONE mode per response:
+
+### MODE A: SVG+CSS (preferred for static visuals)
+Use for: charts, graphs, infographics, dashboards, timelines, data cards, diagrams, comparisons, statistics, visual summaries.
+Advantages: lightweight, instant render, beautiful animations, no JS needed.
+
+OUTPUT FORMAT for SVG mode:
+\\\`\\\`\\\`html
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;padding:0;background:#fff;display:flex;justify-content:center}</style>
+</head><body>
+<svg viewBox="0 0 WIDTH HEIGHT" xmlns="http://www.w3.org/2000/svg">
+  <style>/* CSS here */</style>
+  <!-- SVG content -->
+</svg>
+</body></html>
+\\\`\\\`\\\`
+
+SVG+CSS RULES:
+1. ALWAYS set viewBox. ALWAYS include xmlns="http://www.w3.org/2000/svg".
+2. Use CSS animations: fadeSlideUp, growBar (transform-origin:center bottom), drawLine (stroke-dasharray+dashoffset), animation-delay (0.1~0.2s intervals).
+3. opacity:0 + animation-fill-mode:forwards for animated elements.
+4. Use gradients and filters in <defs> for polish.
+5. Good colors: blues (#3b82f6), greens (#10b981), ambers (#f59e0b), reds (#ef4444).
+6. NO JavaScript in SVG mode.
+
+### MODE B: HTML+JS (for truly interactive content)
+Use for: games, calculators, quizzes, timers, interactive tools, simulations, anything requiring user interaction.
+
+HTML+JS RULES:
+1. Self-contained: all CSS in <style>, all JS in <script>. NO external CDN/links.
+2. Must work in sandboxed iframe (no localStorage, no fetch).
+3. Modern CSS: flexbox, grid, transitions.
+
+## UNIVERSAL RULES:
+1. Output ONE \\\`\\\`\\\`html code fence. Nothing else.
+2. COMPACT code. Background: white (#fff).
+3. Use Korean UI text when user writes Korean.
+4. Write a 1-sentence description, then a BLANK LINE, then the code fence.
+5. CRITICAL: There MUST be an empty line before \\\`\\\`\\\`html. No explanation after closing \\\`\\\`\\\`.
+6. Respond in the same language as the user. Make it visually stunning.`,
+    temperature: 0.7,
+    maxTokens: 8192,
   },
 };
 
@@ -273,6 +323,20 @@ export default async function handler(req, res) {
         res.write('data: [DONE]\n\n');
         return res.end();
       }
+    }
+
+    // Interactive agent: pass through directly — HTML code blocks must not be rewritten
+    const interactiveResult = successfulResults.find((r) =>
+      r.agentName === '인터랙티브 에이전트' || r.agentName?.includes('인터랙티브'));
+    if (interactiveResult && successfulResults.length === 1) {
+      sendSSE(res, 'status', 'streaming');
+      let content = interactiveResult.result;
+      content = content.replace(/([^\n])(```)/g, '$1\n\n$2');
+      sendSSE(res, 'content', content);
+      const followUps = await generateFollowUps(interactiveResult.result, lastUserMsg, fastModel);
+      if (followUps.length > 0) sendSSE(res, 'follow_ups', followUps);
+      res.write('data: [DONE]\n\n');
+      return res.end();
     }
 
     sendSSE(res, 'status', 'synthesize');

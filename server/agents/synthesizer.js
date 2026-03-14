@@ -20,6 +20,14 @@ export async function* synthesizeResults(agentResults, messages, model) {
     return;
   }
 
+  // Interactive agent: pass through directly — HTML code blocks must not be rewritten
+  const interactiveResult = successfulResults.find((r) =>
+    r.agentName === '인터랙티브 에이전트' || r.agentName?.includes('인터랙티브'));
+  if (interactiveResult && successfulResults.length === 1) {
+    yield { __interactive: true, content: interactiveResult.result };
+    return;
+  }
+
   const singleAgent = successfulResults.length === 1;
   const agentContext = successfulResults
     .map((r) => r.result)
