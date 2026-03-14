@@ -74,34 +74,34 @@ const MODEL_GROUPS = [
     id: 'openai',
     label: 'OpenAI',
     models: [
-      'gpt-5.4',
-      'gpt-5.4-pro',
-      'gpt-5.2',
+      // 'gpt-5.4',
+      // 'gpt-5.4-pro',
+      // 'gpt-5.2',
       'gpt-5-mini',
-      'gpt-5-nano',
-      'gpt-4.1',
-      'gpt-4.1-mini',
-      'gpt-4.1-nano',
+      // 'gpt-5-nano',
+      // 'gpt-4.1',
+      // 'gpt-4.1-mini',
+      // 'gpt-4.1-nano',
     ],
   },
-  {
-    id: 'reasoning',
-    label: 'Reasoning',
-    models: [
-      'o3',
-      'o3-pro',
-      'o3-mini',
-      'o4-mini',
-    ],
-  },
-  {
-    id: 'gemini',
-    label: 'Gemini',
-    models: [
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
-    ],
-  },
+  // {
+  //   id: 'reasoning',
+  //   label: 'Reasoning',
+  //   models: [
+  //     'o3',
+  //     'o3-pro',
+  //     'o3-mini',
+  //     'o4-mini',
+  //   ],
+  // },
+  // {
+  //   id: 'gemini',
+  //   label: 'Gemini',
+  //   models: [
+  //     'gemini-2.5-flash',
+  //     'gemini-2.0-flash',
+  //   ],
+  // },
 ];
 
 const MODEL_IDS = new Set(MODEL_GROUPS.flatMap((group) => group.models));
