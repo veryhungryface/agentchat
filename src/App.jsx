@@ -74,14 +74,23 @@ const MODEL_GROUPS = [
     id: 'openai',
     label: 'OpenAI',
     models: [
+      'gpt-5.4',
+      'gpt-5.4-pro',
       'gpt-5.2',
       'gpt-5-mini',
       'gpt-5-nano',
       'gpt-4.1',
       'gpt-4.1-mini',
       'gpt-4.1-nano',
-      'gpt-4o',
-      'gpt-4o-mini',
+    ],
+  },
+  {
+    id: 'reasoning',
+    label: 'Reasoning',
+    models: [
+      'o3',
+      'o3-pro',
+      'o3-mini',
       'o4-mini',
     ],
   },
@@ -96,7 +105,7 @@ const MODEL_GROUPS = [
 ];
 
 const MODEL_IDS = new Set(MODEL_GROUPS.flatMap((group) => group.models));
-const DEFAULT_CHAT_MODEL = 'gpt-4o-mini';
+const DEFAULT_CHAT_MODEL = 'gpt-5-mini';
 
 function truncateLabel(text, max = 26) {
   if (!text) return '';
