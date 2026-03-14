@@ -336,14 +336,12 @@ export default async function handler(req, res) {
       }
     }
 
-    // Interactive agent: pass through directly — HTML code blocks must not be rewritten
+    // Interactive agent: pass through as interactive_html (rendered directly, not as code block)
     const interactiveResult = successfulResults.find((r) =>
       r.agentName === '인터랙티브 에이전트' || r.agentName?.includes('인터랙티브'));
     if (interactiveResult && successfulResults.length === 1) {
       sendSSE(res, 'status', 'streaming');
-      let content = interactiveResult.result;
-      content = content.replace(/([^\n])(```)/g, '$1\n\n$2');
-      sendSSE(res, 'content', content);
+      sendSSE(res, 'interactive_html', interactiveResult.result);
       const followUps = await generateFollowUps(interactiveResult.result, lastUserMsg, fastModel);
       if (followUps.length > 0) sendSSE(res, 'follow_ups', followUps);
       res.write('data: [DONE]\n\n');
