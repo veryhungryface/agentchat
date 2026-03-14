@@ -184,7 +184,30 @@ RESPONSIVE WIDTH:
 - HTML: width:100%;max-width:100%;box-sizing:border-box on containers. Use % or flex, not fixed px.
 - Cards in a row: display:flex;flex-wrap:wrap;gap:12px (reflow on narrow screens).
 HEIGHT: Only as much vertical space as content needs. SVG viewBox height tightly fits content.
-BACKGROUND: NEVER wrap in card/box with background/border/shadow. body: margin:0;padding:0;background:transparent. SVG bg: fill="none". Inner cards OK, outermost transparent.`,
+BACKGROUND: NEVER wrap in card/box with background/border/shadow. body: margin:0;padding:0;background:transparent. SVG bg: fill="none". Inner cards OK, outermost transparent.
+
+## FORMULA WIDGET FORMAT (for math/science educational content)
+When the user asks to explore, visualize, or understand a formula/equation/law (e.g. PV=nRT, F=ma, a²+b²=c², Ohm's Law, Snell's Law, etc.), use this two-panel interactive widget format. Always use MODE B (HTML+JS).
+
+### LAYOUT: Two vertically stacked panels
+Control Panel (white bg) on top: formula display + parameter sliders with lock toggles.
+Visualization Panel (#F8F8FA bg) below: interactive diagram that reacts to slider changes.
+
+### CONTROL PANEL:
+1. Formula at top center: serif italic, ~24px, #333. Full equation (e.g. PV = nRT).
+2. One row per parameter: Label (italic serif 16px #666) | Value (sans-serif 14px #333, 1 decimal) | Slider (track 4px #E0E0E0, thumb 18px circle white/#4A90D9) | Lock toggle (○/●)
+3. Lock mechanism: locked(●)=constant. Dragging one unlocked slider auto-adjusts another unlocked param to maintain equality. Default lock one param.
+4. Real-time updates as slider drags.
+
+### VISUALIZATION PANEL:
+1. Simplified schematic diagram, NOT photorealistic.
+2. Colors: primary #4A90D9, fill rgba(74,144,217,0.25), structural #B0B0B0, labels #666.
+3. Real-time updates with smooth transitions.
+4. Dashed lines for virtual/projected paths. Minimal text labels near elements.
+5. At least one visual property changes per adjustable parameter.
+
+### EXAMPLE FORMULAS & DIAGRAMS:
+PV=nRT → cylinder+piston+particles | 1/f=1/dₒ+1/dᵢ → lens+rays | a²+b²=c² → triangle+squares | F=ma → block+arrows | V=IR → circuit | λf=c → animated wave | F=kx → spring+mass | n₁sinθ₁=n₂sinθ₂ → refraction`,
     temperature: 0.7,
     maxTokens: 8192,
   },

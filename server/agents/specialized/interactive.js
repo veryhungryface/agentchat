@@ -72,12 +72,79 @@ BACKGROUND:
 - body style: \`margin:0;padding:0;background:transparent\`
 - SVG background: \`fill="none"\` or \`fill="transparent"\`, NOT \`fill="#fafafa"\`.
 - Individual inner cards with subtle backgrounds are OK.
-- The OUTERMOST layer must be transparent/borderless — it sits inside a chat bubble.`;
+- The OUTERMOST layer must be transparent/borderless — it sits inside a chat bubble.
+
+## FORMULA WIDGET FORMAT (for math/science educational content)
+When the user asks to explore, visualize, or understand a formula/equation/law (e.g. PV=nRT, F=ma, a²+b²=c², Ohm's Law, Snell's Law, etc.), use this two-panel interactive widget format. Always use MODE B (HTML+JS).
+
+### LAYOUT: Two vertically stacked panels
+\`\`\`
+┌─────────────────────────────┐
+│      CONTROL PANEL          │  ← white background
+│  Formula (large, serif)     │
+│  Param₁  ───○───── ☐       │
+│  Param₂  ─────○─── ☐       │
+│  Param₃  ──○────── ☐       │
+├─────────────────────────────┤
+│    VISUALIZATION PANEL      │  ← #F8F8FA background
+│   (diagram reacts to        │
+│    slider changes)          │
+└─────────────────────────────┘
+\`\`\`
+
+### CONTROL PANEL RULES:
+1. **Formula display** at top center: serif italic font, ~24px, color #333. Show the full equation (e.g. \`PV = nRT\`).
+2. **One row per parameter** with these elements left-to-right:
+   - Label: italic serif, 16px, #666 (e.g. *P*, *V*, *n*, *T*)
+   - Current value: sans-serif, 14px, #333, 1 decimal place
+   - Slider: \`<input type="range">\` spanning most of the row. Track: 4px height, #E0E0E0. Thumb: 18px circle, white fill, #4A90D9 border.
+   - Lock checkbox: circular toggle (○ unlocked / ● locked) on the far right
+3. **Lock mechanism** (KEY FEATURE):
+   - Each parameter has a lock toggle. Locked (●) = value held constant.
+   - When user drags any unlocked slider, ONE other unlocked parameter auto-adjusts to maintain the equation.
+   - Default: lock exactly ONE parameter (the one most naturally "solved for").
+   - This teaches variable relationships interactively.
+4. Sliders update in real-time. The dependent (auto-calculated) variable updates simultaneously.
+
+### VISUALIZATION PANEL RULES:
+1. Background: #F8F8FA (subtle separation from control panel).
+2. Diagram is a simplified schematic — NOT photorealistic.
+3. Color palette:
+   - Primary blue: #4A90D9 (active elements, outlines, particles)
+   - Light blue fill: rgba(74,144,217,0.25) (polygon fills, lens fills, area fills)
+   - Structural gray: #B0B0B0 (walls, axes, frames)
+   - Dark gray: #666 (labels, structural outlines)
+4. Diagram updates in real-time as sliders change. Smooth transitions preferred.
+5. Dashed lines for virtual/projected/construction lines.
+6. Minimal text labels near relevant elements (e.g. "d_i = -18.4").
+7. At least ONE visual property must change with each adjustable parameter.
+
+### FORMULA SOLVING LOGIC:
+\`\`\`
+on slider_change(param):
+  if param.locked: return
+  params[param] = slider.value
+  dependent = find_first_unlocked_param_not_being_dragged()
+  params[dependent] = solve_formula_for(dependent, params)
+  update_all_displays_and_diagram()
+\`\`\`
+
+### EXAMPLE FORMULAS & THEIR DIAGRAMS:
+| Formula | Diagram |
+|---------|---------|
+| PV = nRT | Cylinder with piston + gas particles. Piston height=V, particle count=n, speed=T |
+| 1/f = 1/dₒ + 1/dᵢ | Lens with rays, object arrow, image arrow. Positions shift with params |
+| a² + b² = c² | Right triangle with area squares on each side |
+| F = ma | Block on surface with force/acceleration arrows |
+| V = IR | Simple circuit with battery, resistor, ammeter |
+| λf = c | Animated wave with adjustable wavelength and frequency |
+| F = kx | Spring with mass, stretched/compressed |
+| n₁sinθ₁ = n₂sinθ₂ | Light ray bending at interface |`;
 
 export async function runInteractiveAgent(messages, model) {
   return generate(model, messages, {
     system: SYSTEM_PROMPT,
     temperature: 0.7,
-    maxTokens: 4096,
+    maxTokens: 8192,
   });
 }
