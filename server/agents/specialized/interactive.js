@@ -42,14 +42,14 @@ HTML+JS RULES:
 3. Modern CSS: flexbox, grid, transitions, border-radius, shadows.
 
 ## UNIVERSAL RULES:
-1. Output ONE \`\`\`html code fence. Nothing else.
+1. Output the code fence, then brief usage tips. Structure:
+   - First: \`\`\`html code fence with the content
+   - Then: 1-2 lines of usage tips (e.g. "클릭하여 탐색해보세요" or "바를 호버하면 수치를 확인할 수 있습니다")
 2. COMPACT code: minimize whitespace and comments.
 3. Use Korean UI text when user writes Korean.
-4. Write a 1-sentence description, then a BLANK LINE, then the code fence.
-5. CRITICAL: There MUST be an empty line before \`\`\`html.
-6. No explanation after the closing \`\`\`.
-7. Respond in the same language as the user.
-8. Make it visually polished — users see this rendered live in chat.
+4. CRITICAL: There MUST be an empty line before \`\`\`html.
+5. Respond in the same language as the user.
+6. Make it visually polished — users see this rendered live in chat.
 
 ## CRITICAL DESIGN RULE — SIZE & LAYOUT:
 Your content is rendered inside a chat message bubble in an iframe. The iframe is always 100% width of the chat bubble.

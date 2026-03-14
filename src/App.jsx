@@ -496,6 +496,7 @@ function App() {
   const displayedRef = useRef('');
   const typeTimerRef = useRef(null);
   const streamDoneRef = useRef(false);
+  const interactiveReceivedRef = useRef(false);
 
   const statusSequenceRef = useRef(Promise.resolve());
   const lastQueuedStatusRef = useRef('');
@@ -1079,6 +1080,7 @@ function App() {
     typeBufferRef.current = '';
     displayedRef.current = '';
     streamDoneRef.current = false;
+    interactiveReceivedRef.current = false;
     if (typeTimerRef.current) {
       clearInterval(typeTimerRef.current);
       typeTimerRef.current = null;
@@ -1199,19 +1201,25 @@ function App() {
               const raw = parsed.data || '';
               const fenceMatch = raw.match(/```html\s*\n([\s\S]*?)```/);
               const htmlCode = fenceMatch ? fenceMatch[1].trim() : raw;
-              const desc = fenceMatch ? raw.slice(0, raw.indexOf('```')).trim() : '';
-              displayedRef.current = desc || ' ';
+              interactiveReceivedRef.current = true;
               updateLatestAssistant((a) => ({
                 ...a,
-                content: desc || '',
                 interactiveHtml: htmlCode,
               }));
               continue;
             }
 
             if (parsed.type === 'content') {
-              typeBufferRef.current += parsed.data;
-              maybeStartTyping();
+              if (interactiveReceivedRef.current) {
+                // Content after interactive_html → caption below the visual
+                updateLatestAssistant((a) => ({
+                  ...a,
+                  interactiveCaption: (a.interactiveCaption || '') + parsed.data,
+                }));
+              } else {
+                typeBufferRef.current += parsed.data;
+                maybeStartTyping();
+              }
             }
           } catch {
             // malformed payload ignore

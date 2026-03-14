@@ -340,6 +340,11 @@ function ChatMessage({ message, isStreaming }) {
             <HtmlPreview code={message.interactiveHtml} seamless />
           </div>
         )}
+        {message.interactiveCaption && (
+          <div className="interactive-caption markdown-body">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.interactiveCaption}</ReactMarkdown>
+          </div>
+        )}
       </div>
     </article>
   );

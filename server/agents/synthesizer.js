@@ -43,7 +43,19 @@ Respond in the same language as the user.`,
         maxTokens: 512,
       });
     }
-    yield { __interactive: true, content: interactiveResult.result };
+    // Split interactive result: code fence → interactive_html, trailing text → content
+    const interactiveRaw = interactiveResult.result || '';
+    const fenceMatch = interactiveRaw.match(/```html\s*\n([\s\S]*?)```/);
+    if (fenceMatch) {
+      const htmlCode = fenceMatch[1].trim();
+      const afterFence = interactiveRaw.slice(interactiveRaw.indexOf('```', fenceMatch.index + 3) + 3).trim();
+      yield { __interactive: true, content: htmlCode };
+      if (afterFence) {
+        yield '\n\n' + afterFence;
+      }
+    } else {
+      yield { __interactive: true, content: interactiveRaw };
+    }
     return;
   }
 

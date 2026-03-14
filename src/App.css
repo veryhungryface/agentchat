@@ -836,6 +836,17 @@
   background: #ffffff;
 }
 
+/* ── Interactive caption (usage tips below visual) ─────────────────── */
+.interactive-caption {
+  padding: 12px 0 0;
+  font-size: 13.5px;
+  color: var(--text-muted, #767676);
+  line-height: 1.5;
+}
+.interactive-caption p {
+  margin: 0;
+}
+
 /* ── Seamless interactive embed ─────────────────────────────────────── */
 .interactive-embed {
   position: relative;

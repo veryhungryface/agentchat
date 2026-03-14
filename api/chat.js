@@ -360,7 +360,19 @@ export default async function handler(req, res) {
           sendSSE(res, 'content', chunk);
         }
       }
-      sendSSE(res, 'interactive_html', interactiveResult.result);
+      // Split interactive result: code fence → interactive_html, trailing text → content
+      const interactiveRaw = interactiveResult.result || '';
+      const fenceMatch = interactiveRaw.match(/```html\s*\n([\s\S]*?)```/);
+      if (fenceMatch) {
+        const htmlCode = fenceMatch[1].trim();
+        const afterFence = interactiveRaw.slice(interactiveRaw.indexOf('```', fenceMatch.index + 3) + 3).trim();
+        sendSSE(res, 'interactive_html', htmlCode);
+        if (afterFence) {
+          sendSSE(res, 'content', '\n\n' + afterFence);
+        }
+      } else {
+        sendSSE(res, 'interactive_html', interactiveRaw);
+      }
       const followUps = await generateFollowUps(lastUserMsg, lastUserMsg, fastModel);
       if (followUps.length > 0) sendSSE(res, 'follow_ups', followUps);
       res.write('data: [DONE]\n\n');
