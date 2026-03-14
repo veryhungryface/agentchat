@@ -238,26 +238,28 @@ HTML+JS RULES:
    Auto-render converts all \\\`$...$\\\` and \\\`$$...$$\\\` into beautiful rendered math.
    ALWAYS use for: formulas, variable labels, greek letters (\\\`$\\\\alpha$\\\`), fractions (\\\`$\\\\frac{1}{f}$\\\`).
 
-## UNIVERSAL RULES — 3-STEP OUTPUT FORMAT (follow STRICTLY):
-Your response MUST have exactly 3 parts in this order:
+## OUTPUT FORMAT (follow STRICTLY):
+Your response has exactly 3 parts. Do NOT include labels like "STEP", "INTRO", "OUTRO" — just the content itself.
 
-STEP 1 — INTRO (1-2 sentences): Briefly describe what you will show.
-Example: "삼각함수의 원리를 단위원으로 시각화해 보여드리겠습니다."
-
-STEP 2 — CODE FENCE:
+Part 1: 1-2 sentences describing what you will show. Natural conversational tone.
+(blank line)
 \\\`\\\`\\\`html
-(your HTML/SVG code)
+(your code)
+\\\`\\\`\\\`
+(blank line)
+Part 3: 1-3 sentences — usage tips or brief explanation of the content.
+
+EXAMPLE:
+삼각함수의 원리를 단위원으로 시각화해 보여드리겠습니다.
+
+\\\`\\\`\\\`html
+<!DOCTYPE html>...
 \\\`\\\`\\\`
 
-STEP 3 — OUTRO (1-3 sentences): Briefly explain the content, usage tips, key takeaways.
-Example: "슬라이더를 움직여 각도를 변경하면 sin, cos 값이 실시간으로 변합니다."
+슬라이더를 움직여 각도를 변경하면 sin, cos 값이 실시간으로 변합니다.
 
-ADDITIONAL RULES:
-1. COMPACT code: minimize whitespace and comments.
-2. Use Korean UI text when user writes Korean.
-3. CRITICAL: There MUST be an empty line before \\\`\\\`\\\`html.
-4. Respond in the same language as the user. Make it visually polished.
-5. Do NOT include any other text outside the 3-step structure.
+RULES:
+1. COMPACT code. 2. Korean UI text when user writes Korean. 3. Empty line before \\\`\\\`\\\`html. 4. Same language as user. 5. Visually polished. 6. No labels/headers/markers — just natural sentences and code fence.
 
 ## CRITICAL DESIGN RULE — SIZE & LAYOUT:
 Your content is rendered inside a chat bubble in an iframe (100% width of bubble).
