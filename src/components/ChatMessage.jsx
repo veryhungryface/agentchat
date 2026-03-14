@@ -342,7 +342,7 @@ function ChatMessage({ message, isStreaming }) {
         )}
         {message.interactiveCaption && (
           <div className="interactive-caption markdown-body">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.interactiveCaption}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{message.interactiveCaption}</ReactMarkdown>
           </div>
         )}
       </div>
