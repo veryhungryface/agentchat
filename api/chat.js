@@ -95,6 +95,69 @@ Rules:
   }
 }
 
+// ── Web Search (DuckDuckGo HTML — no API key, no CAPTCHA) ─────────────────
+const SEARCH_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const BLOCKED_DOMAINS = /coupang\.com|naver\.com|daum\.net|tistory\.com|instagram\.com|facebook\.com|twitter\.com|x\.com/i;
+
+async function webSearch(query, maxResults = 5) {
+  const resp = await fetch('https://html.duckduckgo.com/html/', {
+    method: 'POST',
+    headers: {
+      'User-Agent': SEARCH_UA,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'text/html,application/xhtml+xml',
+      'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
+    },
+    body: `q=${encodeURIComponent(query)}&kl=kr-kr`,
+    redirect: 'follow',
+  });
+  if (!resp.ok) return { query, results: [], pageContent: '', source: '' };
+  const html = await resp.text();
+  const results = [];
+  const blocks = html.split(/class="result\s+results_links/);
+  for (let i = 1; i < blocks.length && results.length < maxResults; i++) {
+    const block = blocks[i];
+    const urlMatch = block.match(/class="result__a"[^>]*href="([^"]*)"/);
+    if (!urlMatch) continue;
+    let url = urlMatch[1];
+    const uddg = url.match(/uddg=([^&]*)/);
+    if (uddg) { try { url = decodeURIComponent(uddg[1]); } catch {} }
+    if (url.startsWith('//')) url = 'https:' + url;
+    const titleMatch = block.match(/class="result__a"[^>]*>([\s\S]*?)<\/a>/);
+    const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+    const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
+    const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+    if (url && title) results.push({ title, url, snippet });
+  }
+  // Fetch content from first accessible result
+  let pageContent = '';
+  let source = 'duckduckgo.com';
+  for (const r of results.slice(0, 3)) {
+    if (!r.url || BLOCKED_DOMAINS.test(r.url)) continue;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const pr = await fetch(r.url, {
+        headers: { 'User-Agent': SEARCH_UA, 'Accept': 'text/html', 'Accept-Language': 'ko-KR,ko;q=0.9' },
+        signal: ctrl.signal, redirect: 'follow',
+      });
+      clearTimeout(timer);
+      if (!pr.ok) continue;
+      const ct = pr.headers.get('content-type') || '';
+      if (!ct.includes('text/html')) continue;
+      const ph = await pr.text();
+      const cleaned = ph
+        .replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '')
+        .replace(/<nav[\s\S]*?<\/nav>/gi, '').replace(/<header[\s\S]*?<\/header>/gi, '')
+        .replace(/<footer[\s\S]*?<\/footer>/gi, '').replace(/<aside[\s\S]*?<\/aside>/gi, '')
+        .replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/&#\d+;/g, ' ')
+        .replace(/\s+/g, ' ').trim();
+      if (cleaned.length > 100) { pageContent = cleaned.slice(0, 3000); source = r.url; break; }
+    } catch { /* next */ }
+  }
+  return { query, results, pageContent, source };
+}
+
 // ── Stage 3: Agent execution ────────────────────────────────────────────────
 const AGENT_LABELS = {
   research: '리서치 에이전트',
@@ -219,6 +282,10 @@ PV=nRT → cylinder+piston+particles | 1/f=1/dₒ+1/dᵢ → lens+rays | a²+b²
 };
 
 async function runAgent(agentType, messages, model) {
+  // Research agent: use real web search
+  if (agentType === 'research') {
+    return runResearchAgent(messages, model);
+  }
   const config = AGENT_PROMPTS[agentType] || AGENT_PROMPTS.general;
   const { text } = await generateText({
     model: getModel(model),
@@ -226,6 +293,51 @@ async function runAgent(agentType, messages, model) {
     messages,
     temperature: config.temperature,
     maxTokens: config.maxTokens,
+  });
+  return text;
+}
+
+async function runResearchAgent(messages, model) {
+  const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
+  // Generate search query
+  const { text: rawQuery } = await generateText({
+    model: getModel(model),
+    messages: [{ role: 'user', content: `Convert this question into a web search query. Output ONLY the search query text, no quotes.\n\nQuestion: ${lastUserMsg}` }],
+    temperature: 0.3, maxTokens: 100,
+  });
+  const query = rawQuery.trim().replace(/^["']|["']$/g, '');
+  const finalQuery = query.length >= 5 ? query : lastUserMsg;
+
+  try {
+    const searchResult = await webSearch(finalQuery);
+    if (searchResult.results.length > 0) {
+      const context = [
+        `Search query: "${searchResult.query}"`, `Source: ${searchResult.source}`, '',
+        'Search results:',
+        ...searchResult.results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`),
+      ];
+      if (searchResult.pageContent) {
+        context.push('', 'Page content:', searchResult.pageContent);
+      }
+      const { text } = await generateText({
+        model: getModel(model),
+        system: `You are a research specialist. Analyze the web search results and provide a thorough answer. Do NOT include URLs or source sections. Respond in the same language as the user.`,
+        messages: [
+          ...messages,
+          { role: 'assistant', content: `Web search results:\n\n${context.join('\n')}` },
+          { role: 'user', content: 'Based on the search results, provide a comprehensive answer to my original question.' },
+        ],
+        temperature: 0.5, maxTokens: 2048,
+      });
+      return text;
+    }
+  } catch (err) {
+    console.error('[api/chat] Search failed:', err.message);
+  }
+  // Fallback: LLM knowledge
+  const { text } = await generateText({
+    model: getModel(model), system: AGENT_PROMPTS.research.system,
+    messages, temperature: 0.5, maxTokens: 2048,
   });
   return text;
 }
