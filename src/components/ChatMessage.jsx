@@ -402,7 +402,7 @@ function ChatMessage({ message, isStreaming }) {
           <span className="cursor-blink" />
         ) : null}
         {showCodePreview && (
-          <InteractiveCodePreview code={message.interactiveCodeBuffer} />
+          <ProgressiveHtmlPreview code={message.interactiveCodeBuffer} />
         )}
         {message.interactiveHtml && (
           <div className="interactive-embed">

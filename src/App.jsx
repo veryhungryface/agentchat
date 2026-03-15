@@ -1134,9 +1134,15 @@ function App() {
       const decoder = new TextDecoder();
       let buffer = '';
 
+      let _dbgFirstContent = 0;
+      let _dbgChunkCount = 0;
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+
+        _dbgChunkCount++;
+        if (_dbgChunkCount <= 3) console.log(`[sse] reader.read() #${_dbgChunkCount} bytes=${value?.length} t=${Date.now()}`);
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -1211,6 +1217,7 @@ function App() {
             }
 
             if (parsed.type === 'interactive_code_delta') {
+              if (!window._dbgFirstDelta) { window._dbgFirstDelta = Date.now(); console.log(`[sse] FIRST code_delta at t=${window._dbgFirstDelta}`); }
               updateLatestAssistant((a) => ({
                 ...a,
                 interactiveCodeBuffer: (a.interactiveCodeBuffer || '') + (parsed.data || ''),
@@ -1219,6 +1226,8 @@ function App() {
             }
 
             if (parsed.type === 'interactive_html') {
+              console.log(`[sse] interactive_html received at t=${Date.now()}`);
+
               const raw = parsed.data || '';
               const fenceMatch = raw.match(/```html\s*\n([\s\S]*?)```/);
               const htmlCode = fenceMatch ? fenceMatch[1].trim() : raw;
@@ -1232,6 +1241,7 @@ function App() {
             }
 
             if (parsed.type === 'content') {
+              if (!_dbgFirstContent) { _dbgFirstContent = Date.now(); console.log(`[sse] FIRST content event at t=${_dbgFirstContent}`); }
               if (interactiveReceivedRef.current) {
                 // Content after interactive_html → caption below the visual
                 updateLatestAssistant((a) => ({
