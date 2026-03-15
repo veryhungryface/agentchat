@@ -145,28 +145,36 @@ app.post('/api/chat', async (req, res) => {
       // ── Interactive agent: stream with 3-part parsing (intro → html → outro)
       sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 실행 중...` });
       sendSSE(res, 'status', 'streaming');
+      console.log('[interactive] Stream started');
 
       const { streamInteractiveAgent } = await import('./server/agents/specialized/interactive.js');
       let state = 'intro'; // 'intro' | 'html' | 'outro'
       let buffer = '';
       let sentLen = 0;
       let htmlCode = '';
+      let chunkCount = 0;
 
       try {
         for await (const chunk of streamInteractiveAgent(apiMessages, mainModel)) {
+          chunkCount++;
+          if (chunkCount <= 3 || chunkCount % 20 === 0) {
+            console.log(`[interactive] chunk #${chunkCount} state=${state} len=${chunk.length} total=${buffer.length + htmlCode.length}`);
+          }
+
           if (state === 'intro') {
             buffer += chunk;
             const fenceIdx = buffer.indexOf('```html');
             if (fenceIdx !== -1) {
               const introText = buffer.slice(sentLen, fenceIdx).trimEnd();
               if (introText) {
+                console.log(`[interactive] INTRO sent: "${introText.slice(0, 60)}..." (${introText.length} chars)`);
                 sendSSE(res, 'content', introText + '\n\n');
                 fullAnswer += introText;
               }
               state = 'html';
               htmlCode = buffer.slice(fenceIdx + 7).replace(/^\n/, '');
+              console.log(`[interactive] → HTML state`);
             } else {
-              // Stream safe portion (keep last 7 chars buffered for split fence)
               const safeEnd = Math.max(sentLen, buffer.length - 7);
               if (safeEnd > sentLen) {
                 const text = buffer.slice(sentLen, safeEnd);
@@ -181,18 +189,20 @@ app.post('/api/chat', async (req, res) => {
             const closeIdx = htmlCode.indexOf('\n```');
             if (closeIdx !== -1 && htmlCode[closeIdx + 4] !== '`') {
               const code = htmlCode.slice(0, closeIdx).trim();
+              console.log(`[interactive] HTML complete: ${code.length} chars → sending interactive_html`);
               sendSSE(res, 'interactive_html', code);
               state = 'outro';
               let afterFence = htmlCode.slice(closeIdx + 4);
               if (afterFence.startsWith('\n')) afterFence = afterFence.slice(1);
               htmlCode = '';
               if (afterFence.trim()) {
+                console.log(`[interactive] → OUTRO started: "${afterFence.trim().slice(0, 60)}..."`);
                 sendSSE(res, 'content', afterFence.trimStart());
                 fullAnswer += afterFence.trimStart();
               }
+              console.log(`[interactive] → OUTRO state`);
             }
           } else {
-            // outro — stream directly
             sendSSE(res, 'content', chunk);
             fullAnswer += chunk;
           }
@@ -206,13 +216,17 @@ app.post('/api/chat', async (req, res) => {
         if (state === 'intro') {
           const remaining = buffer.slice(sentLen).trim();
           if (remaining) { sendSSE(res, 'content', remaining); fullAnswer += remaining; }
+          console.log(`[interactive] Stream ended in INTRO state (no fence found)`);
         } else if (state === 'html') {
+          console.log(`[interactive] Stream ended in HTML state (fence not closed), sending ${htmlCode.length} chars`);
           sendSSE(res, 'interactive_html', htmlCode.trim());
+        } else {
+          console.log(`[interactive] Stream complete — ${chunkCount} chunks total`);
         }
 
         sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 완료 ✓` });
       } catch (err) {
-        console.error('[pipeline] Interactive stream error:', err.message);
+        console.error('[interactive] Stream error:', err.message);
         sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 실패 ✗` });
         sendSSE(res, 'content', `오류가 발생했습니다: ${err.message}`);
       }

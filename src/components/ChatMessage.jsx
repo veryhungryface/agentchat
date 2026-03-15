@@ -304,29 +304,68 @@ function InteractiveMenu({ code }) {
   );
 }
 
-function InteractiveCodePreview({ code }) {
-  const preRef = useRef(null);
+function ProgressiveHtmlPreview({ code }) {
+  const iframeRef = useRef(null);
+  const idRef = useRef(`prog-${++previewIdCounter}`);
+  const [height, setHeight] = useState(120);
+  const writtenRef = useRef('');
+  const timerRef = useRef(null);
 
+  // Debounced progressive render via document.write (no reload flash)
   useEffect(() => {
-    if (preRef.current) {
-      preRef.current.scrollTop = preRef.current.scrollHeight;
-    }
+    if (!code || code === writtenRef.current) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      writtenRef.current = code;
+      const iframe = iframeRef.current;
+      if (!iframe) return;
+      try {
+        // Strip <script> from partial HTML (partial scripts would error)
+        const noScripts = code.replace(/<script[\s\S]*?(<\/script>|$)/gi, '');
+        const id = idRef.current;
+        const resizeJs = `<script>(function(){function s(){var b=document.body;if(!b)return;var h=Math.max(b.scrollHeight,b.offsetHeight,100);parent.postMessage({__iframeHeight:h,__iframeId:"${id}"},"*")}s();setTimeout(s,50);setTimeout(s,200);if(window.ResizeObserver)new ResizeObserver(s).observe(document.documentElement)})()</script>`;
+        const baseStyle = `<style>${IFRAME_BASE_STYLE}</style>`;
+        let html;
+        if (/<!doctype\s+html/i.test(noScripts) || /<html[\s>]/i.test(noScripts)) {
+          html = noScripts + baseStyle + resizeJs;
+        } else {
+          html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${baseStyle}</head><body>${noScripts}${resizeJs}</body></html>`;
+        }
+        const doc = iframe.contentWindow.document;
+        doc.open();
+        doc.write(html);
+        doc.close();
+      } catch { /* cross-origin fallback: ignore */ }
+    }, 600);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [code]);
 
-  const lines = (code || '').split('\n');
-  const lineCount = lines.length;
-  const charCount = (code || '').length;
+  // Height listener
+  useEffect(() => {
+    const id = idRef.current;
+    const handler = (e) => {
+      if (e.data?.__iframeId === id && typeof e.data.__iframeHeight === 'number') {
+        setHeight(Math.max(e.data.__iframeHeight, 100));
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
 
   return (
-    <div className="interactive-generating">
-      <div className="generating-header">
+    <div className="interactive-embed progressive-embed">
+      <div className="generating-badge">
         <div className="generating-dots"><span /><span /><span /></div>
-        <span className="generating-label">코드 생성 중</span>
-        <span className="generating-stats">{charCount.toLocaleString()}자 · {lineCount}줄</span>
+        <span>생성 중...</span>
       </div>
-      <pre className="generating-code" ref={preRef}>
-        <code>{code}</code>
-      </pre>
+      <iframe
+        ref={iframeRef}
+        sandbox="allow-scripts allow-same-origin"
+        className="interactive-iframe"
+        style={{ height: `${height}px`, transition: 'height 0.3s ease' }}
+        title="생성 중..."
+        scrolling="no"
+      />
     </div>
   );
 }

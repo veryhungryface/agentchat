@@ -487,20 +487,29 @@ export default async function handler(req, res) {
       let buffer = '';
       let sentLen = 0;
       let htmlCode = '';
+      let chunkCount = 0;
+      console.log('[interactive] Stream started');
 
       try {
         for await (const chunk of interactiveStream.textStream) {
+          chunkCount++;
+          if (chunkCount <= 3 || chunkCount % 20 === 0) {
+            console.log(`[interactive] chunk #${chunkCount} state=${state} len=${chunk.length}`);
+          }
+
           if (state === 'intro') {
             buffer += chunk;
             const fenceIdx = buffer.indexOf('```html');
             if (fenceIdx !== -1) {
               const introText = buffer.slice(sentLen, fenceIdx).trimEnd();
               if (introText) {
+                console.log(`[interactive] INTRO: "${introText.slice(0, 60)}..."`);
                 sendSSE(res, 'content', introText + '\n\n');
                 fullAnswer += introText;
               }
               state = 'html';
               htmlCode = buffer.slice(fenceIdx + 7).replace(/^\n/, '');
+              console.log(`[interactive] → HTML state`);
             } else {
               const safeEnd = Math.max(sentLen, buffer.length - 7);
               if (safeEnd > sentLen) {
@@ -516,6 +525,7 @@ export default async function handler(req, res) {
             const closeIdx = htmlCode.indexOf('\n```');
             if (closeIdx !== -1 && htmlCode[closeIdx + 4] !== '`') {
               const code = htmlCode.slice(0, closeIdx).trim();
+              console.log(`[interactive] HTML complete: ${code.length} chars`);
               sendSSE(res, 'interactive_html', code);
               state = 'outro';
               let afterFence = htmlCode.slice(closeIdx + 4);
@@ -525,6 +535,7 @@ export default async function handler(req, res) {
                 sendSSE(res, 'content', afterFence.trimStart());
                 fullAnswer += afterFence.trimStart();
               }
+              console.log(`[interactive] → OUTRO state`);
             }
           } else {
             sendSSE(res, 'content', chunk);
@@ -537,6 +548,7 @@ export default async function handler(req, res) {
         }
 
         // End-of-stream flush
+        console.log(`[interactive] Stream ended in ${state} state, ${chunkCount} chunks`);
         if (state === 'intro') {
           const remaining = buffer.slice(sentLen).trim();
           if (remaining) { sendSSE(res, 'content', remaining); fullAnswer += remaining; }
