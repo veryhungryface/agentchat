@@ -169,8 +169,10 @@ on slider_change(param):
 | F = kx | Spring with mass, stretched/compressed |
 | n₁sinθ₁ = n₂sinθ₂ | Light ray bending at interface |`;
 
+const INTERACTIVE_MODEL = 'gpt-4.1';
+
 export async function runInteractiveAgent(messages, model) {
-  return generate(model, messages, {
+  return generate(INTERACTIVE_MODEL, messages, {
     system: SYSTEM_PROMPT,
     temperature: 0.7,
     maxTokens: 8192,
@@ -178,7 +180,7 @@ export async function runInteractiveAgent(messages, model) {
 }
 
 export async function* streamInteractiveAgent(messages, model) {
-  yield* stream(model, messages, {
+  yield* stream(INTERACTIVE_MODEL, messages, {
     system: SYSTEM_PROMPT,
     temperature: 0.7,
     maxTokens: 8192,

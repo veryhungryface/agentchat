@@ -476,7 +476,7 @@ export default async function handler(req, res) {
 
       const config = AGENT_PROMPTS.interactive;
       const interactiveStream = streamText({
-        model: getModel(mainModel),
+        model: getModel('gpt-4.1'),
         system: config.system,
         messages: apiMessages,
         temperature: config.temperature,
