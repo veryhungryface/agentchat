@@ -77,6 +77,7 @@ RULES:
 4. Respond in the same language as the user.
 5. Make it visually polished — users see this rendered live in chat.
 6. Do NOT write labels, headers, or markers — just natural sentences and the code fence.
+7. **LaTeX for ALL math**: In Part 1 and Part 3 text, ALWAYS write mathematical expressions using LaTeX notation: inline \`$E=mc^2$\`, display \`$$F=ma$$\`. This includes variable names ($x$, $v$), Greek letters ($\\alpha$, $\\theta$), formulas, equations, and any mathematical symbols. The text is rendered with KaTeX — plain text math will NOT render properly.
 
 ## CRITICAL DESIGN RULE — SIZE & LAYOUT:
 Your content is rendered inside a chat message bubble in an iframe. The iframe is always 100% width of the chat bubble.

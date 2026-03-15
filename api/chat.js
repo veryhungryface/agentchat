@@ -260,6 +260,7 @@ EXAMPLE:
 
 RULES:
 1. COMPACT code. 2. Korean UI text when user writes Korean. 3. Empty line before \\\`\\\`\\\`html. 4. Same language as user. 5. Visually polished. 6. No labels/headers/markers — just natural sentences and code fence.
+7. **LaTeX for ALL math**: In Part 1 and Part 3 text, ALWAYS write math using LaTeX: inline \\\`$E=mc^2$\\\`, display \\\`$$F=ma$$\\\`. Includes variable names ($x$), Greek letters ($\\\\alpha$), formulas, equations. Text is rendered with KaTeX — plain text math won't render.
 
 ## CRITICAL DESIGN RULE — SIZE & LAYOUT:
 Your content is rendered inside a chat bubble in an iframe (100% width of bubble).
