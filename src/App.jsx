@@ -768,6 +768,15 @@ function App() {
     });
   };
 
+  const removeThinkingProgress = (stage) => {
+    updatePipeline((pipeline) => {
+      pipeline.activity = (pipeline.activity || []).filter(
+        (item) => !(item.type === 'progress' && item.stage === stage),
+      );
+      return pipeline;
+    });
+  };
+
   const setProgressSpinning = (stage, spinning) => {
     updatePipeline((pipeline) => {
       pipeline.activity = (pipeline.activity || []).map((item) => {
@@ -1158,7 +1167,11 @@ function App() {
             if (parsed.type === 'thinking_update') {
               const { stage, text } = parsed.data || {};
               if (stage && text) {
-                upsertThinkingProgress(stage, text, { spinning: !text.includes('✓') && !text.includes('✗') });
+                const isComplete = text.includes('✓') || text.includes('✗');
+                upsertThinkingProgress(stage, text, { spinning: !isComplete });
+                if (isComplete) {
+                  setTimeout(() => removeThinkingProgress(stage), 600);
+                }
               }
               continue;
             }
