@@ -1,4 +1,4 @@
-import { generate } from '../../llm.js';
+import { generate, stream } from '../../llm.js';
 
 const SYSTEM_PROMPT = `You are a visual & interactive content creator. You render content directly in the user's chat.
 
@@ -171,6 +171,14 @@ on slider_change(param):
 
 export async function runInteractiveAgent(messages, model) {
   return generate(model, messages, {
+    system: SYSTEM_PROMPT,
+    temperature: 0.7,
+    maxTokens: 8192,
+  });
+}
+
+export async function* streamInteractiveAgent(messages, model) {
+  yield* stream(model, messages, {
     system: SYSTEM_PROMPT,
     temperature: 0.7,
     maxTokens: 8192,

@@ -133,133 +133,154 @@ app.post('/api/chat', async (req, res) => {
       sendSSE(res, 'status', 'search_skipped');
     }
 
-    // ── Stage 3: Parallel Agent Execution ─────────────────────────────────────
+    // ── Stage 3: Agent Execution ────────────────────────────────────────────────
     sendSSE(res, 'status', 'executing');
     const t3 = timer('agents');
 
-    // If interactive agent is included, run it separately so we can
-    // stream text results immediately without waiting for it
     const hasInteractive = agentList.includes('interactive');
-    const textAgentList = hasInteractive ? agentList.filter((a) => a !== 'interactive') : agentList;
+    let fullAnswer = '';
+    let followUpPromise = null;
 
-    let interactivePromise = null;
     if (hasInteractive) {
+      // ── Interactive agent: stream with 3-part parsing (intro → html → outro)
       sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 실행 중...` });
-      interactivePromise = import('./server/agents/specialized/interactive.js')
-        .then((mod) => mod.runInteractiveAgent(apiMessages, mainModel))
-        .then((result) => {
-          sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 완료 ✓` });
-          return { agentName: AGENT_LABELS.interactive, result, success: true };
-        })
-        .catch((err) => {
-          console.error('[pipeline] Interactive agent failed:', err.message);
-          sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 실패 ✗` });
-          return { agentName: AGENT_LABELS.interactive, result: '', success: false, error: err.message };
-        });
-    }
+      sendSSE(res, 'status', 'streaming');
 
-    // Dispatch text agents (general, research, etc.) — these complete fast
-    const agentResults = textAgentList.length > 0
-      ? await dispatchAgents(textAgentList, apiMessages, mainModel, fastModel, {
-          onAgentStart: (label, type) => {
-            sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${label} 실행 중...` });
-            if (type === 'research' || type === 'browser') {
-              sendSSE(res, 'status', 'searching');
-            }
-          },
-          onAgentComplete: (label, success) => {
-            sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: success ? `${label} 완료 ✓` : `${label} 실패 ✗` });
-          },
-          onScreenshot: (screenshot) => {
-            sendSSE(res, 'browser_screenshot', screenshot);
-          },
-        })
-      : [];
-    t3();
+      const { streamInteractiveAgent } = await import('./server/agents/specialized/interactive.js');
+      let state = 'intro'; // 'intro' | 'html' | 'outro'
+      let buffer = '';
+      let sentLen = 0;
+      let htmlCode = '';
 
-    // Fallback: if all text agents failed, try general agent directly
-    const allFailed = agentResults.length > 0 && agentResults.every((r) => !r.success || !r.result);
-    if (allFailed) {
-      const errors = agentResults.map((r) => `${r.agentName}: ${r.error}`).join(', ');
-      console.error('[pipeline] All agents failed:', errors);
-      sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `에이전트 실패 — 일반 모드로 재시도 중...` });
       try {
-        const { runGeneralAgent } = await import('./server/agents/specialized/general.js');
-        const fallbackResult = await runGeneralAgent(apiMessages, fastModel);
-        agentResults.push({ agentName: '일반 에이전트 (폴백)', result: fallbackResult, success: true });
-        sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: '일반 모드 폴백 완료 ✓' });
-      } catch (fallbackErr) {
-        console.error('[pipeline] Fallback also failed:', fallbackErr.message);
-        if (!interactivePromise) {
+        for await (const chunk of streamInteractiveAgent(apiMessages, mainModel)) {
+          if (state === 'intro') {
+            buffer += chunk;
+            const fenceIdx = buffer.indexOf('```html');
+            if (fenceIdx !== -1) {
+              const introText = buffer.slice(sentLen, fenceIdx).trimEnd();
+              if (introText) {
+                sendSSE(res, 'content', introText + '\n\n');
+                fullAnswer += introText;
+              }
+              state = 'html';
+              htmlCode = buffer.slice(fenceIdx + 7).replace(/^\n/, '');
+            } else {
+              // Stream safe portion (keep last 7 chars buffered for split fence)
+              const safeEnd = Math.max(sentLen, buffer.length - 7);
+              if (safeEnd > sentLen) {
+                const text = buffer.slice(sentLen, safeEnd);
+                sendSSE(res, 'content', text);
+                fullAnswer += text;
+                sentLen = safeEnd;
+              }
+            }
+          } else if (state === 'html') {
+            htmlCode += chunk;
+            const closeIdx = htmlCode.indexOf('\n```');
+            if (closeIdx !== -1 && htmlCode[closeIdx + 4] !== '`') {
+              const code = htmlCode.slice(0, closeIdx).trim();
+              sendSSE(res, 'interactive_html', code);
+              state = 'outro';
+              let afterFence = htmlCode.slice(closeIdx + 4);
+              if (afterFence.startsWith('\n')) afterFence = afterFence.slice(1);
+              htmlCode = '';
+              if (afterFence.trim()) {
+                sendSSE(res, 'content', afterFence.trimStart());
+                fullAnswer += afterFence.trimStart();
+              }
+            }
+          } else {
+            // outro — stream directly
+            sendSSE(res, 'content', chunk);
+            fullAnswer += chunk;
+          }
+
+          if (!followUpPromise && fullAnswer.length > 200) {
+            followUpPromise = generateFollowUps(fullAnswer, lastUserMsg, fastModel);
+          }
+        }
+
+        // End-of-stream flush
+        if (state === 'intro') {
+          const remaining = buffer.slice(sentLen).trim();
+          if (remaining) { sendSSE(res, 'content', remaining); fullAnswer += remaining; }
+        } else if (state === 'html') {
+          sendSSE(res, 'interactive_html', htmlCode.trim());
+        }
+
+        sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 완료 ✓` });
+      } catch (err) {
+        console.error('[pipeline] Interactive stream error:', err.message);
+        sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${AGENT_LABELS.interactive} 실패 ✗` });
+        sendSSE(res, 'content', `오류가 발생했습니다: ${err.message}`);
+      }
+      t3();
+    } else {
+      // ── Text agents: dispatch + synthesis ──────────────────────────────────
+      const agentResults = await dispatchAgents(agentList, apiMessages, mainModel, fastModel, {
+        onAgentStart: (label, type) => {
+          sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `${label} 실행 중...` });
+          if (type === 'research' || type === 'browser') sendSSE(res, 'status', 'searching');
+        },
+        onAgentComplete: (label, success) => {
+          sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: success ? `${label} 완료 ✓` : `${label} 실패 ✗` });
+        },
+        onScreenshot: (screenshot) => sendSSE(res, 'browser_screenshot', screenshot),
+      });
+      t3();
+
+      // Fallback
+      const allFailed = agentResults.length > 0 && agentResults.every((r) => !r.success || !r.result);
+      if (allFailed) {
+        const errors = agentResults.map((r) => `${r.agentName}: ${r.error}`).join(', ');
+        console.error('[pipeline] All agents failed:', errors);
+        sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: `에이전트 실패 — 일반 모드로 재시도 중...` });
+        try {
+          const { runGeneralAgent } = await import('./server/agents/specialized/general.js');
+          const fallbackResult = await runGeneralAgent(apiMessages, fastModel);
+          agentResults.push({ agentName: '일반 에이전트 (폴백)', result: fallbackResult, success: true });
+          sendSSE(res, 'thinking_update', { stage: 'agent_exec', text: '일반 모드 폴백 완료 ✓' });
+        } catch (fallbackErr) {
+          console.error('[pipeline] Fallback also failed:', fallbackErr.message);
           sendSSE(res, 'content', `오류가 발생했습니다: ${errors}`);
           res.write('data: [DONE]\n\n');
           return res.end();
         }
       }
-    }
 
-    // Attach search results to pipeline (if research agent ran)
-    const researchResult = agentResults.find((r) => r.agentName === AGENT_LABELS.research);
-    if (researchResult?.success && researchResult.result) {
-      const urlMatches = researchResult.result.match(/https?:\/\/[^\s)]+/g) || [];
-      const sources = urlMatches.slice(0, 5).map((url) => ({ url, title: url }));
-      if (sources.length > 0) {
-        sendSSE(res, 'search', { query: lastUserMsg, results: sources, round: 1 });
+      // Search results
+      const researchResult = agentResults.find((r) => r.agentName === AGENT_LABELS.research);
+      if (researchResult?.success && researchResult.result) {
+        const urlMatches = researchResult.result.match(/https?:\/\/[^\s)]+/g) || [];
+        const sources = urlMatches.slice(0, 5).map((url) => ({ url, title: url }));
+        if (sources.length > 0) sendSSE(res, 'search', { query: lastUserMsg, results: sources, round: 1 });
       }
-    }
 
-    // ── Stage 4-5: Synthesis + Streaming (text first, interactive later) ─────
-    sendSSE(res, 'status', 'synthesize');
-    sendSSE(res, 'thinking_update', { stage: 'synthesize', text: '결과 종합 중...' });
-    const t4 = timer('synthesis');
-
-    sendSSE(res, 'status', 'streaming');
-    let fullAnswer = '';
-    let followUpPromise = null;
-
-    // Stream text agent results immediately (don't wait for interactive)
-    const successfulTextResults = agentResults.filter((r) => r.success && r.result);
-    if (successfulTextResults.length > 0) {
-      for await (const chunk of synthesizeResults(agentResults, apiMessages, mainModel)) {
-        if (chunk && typeof chunk === 'object' && chunk.__interactive) {
-          sendSSE(res, 'interactive_html', chunk.content);
-          continue;
-        }
-        fullAnswer += chunk;
-        sendSSE(res, 'content', chunk);
-        if (!followUpPromise && fullAnswer.length > 200) {
-          followUpPromise = generateFollowUps(fullAnswer, lastUserMsg, fastModel);
-        }
-      }
-    }
-    t4();
-
-    // Now wait for interactive agent and send 3-part output: intro → html → outro
-    if (interactivePromise) {
-      const interactiveResult = await interactivePromise;
-      if (interactiveResult.success && interactiveResult.result) {
-        const raw = interactiveResult.result;
-        const fenceMatch = raw.match(/```html\s*\n([\s\S]*?)```/);
-        if (fenceMatch) {
-          // STEP 1: Intro text (before the code fence)
-          const beforeFence = raw.slice(0, fenceMatch.index).trim();
-          if (beforeFence) sendSSE(res, 'content', beforeFence + '\n\n');
-          // STEP 2: Interactive HTML content
-          const htmlCode = fenceMatch[1].trim();
-          sendSSE(res, 'interactive_html', htmlCode);
-          // STEP 3: Outro text (after the code fence)
-          const afterFence = raw.slice(raw.indexOf('```', fenceMatch.index + 3) + 3).trim();
-          if (afterFence) sendSSE(res, 'content', '\n\n' + afterFence);
-        } else {
-          sendSSE(res, 'interactive_html', raw);
+      // Synthesis
+      sendSSE(res, 'status', 'synthesize');
+      sendSSE(res, 'thinking_update', { stage: 'synthesize', text: '결과 종합 중...' });
+      sendSSE(res, 'status', 'streaming');
+      const successfulResults = agentResults.filter((r) => r.success && r.result);
+      if (successfulResults.length > 0) {
+        for await (const chunk of synthesizeResults(agentResults, apiMessages, mainModel)) {
+          if (chunk && typeof chunk === 'object' && chunk.__interactive) {
+            sendSSE(res, 'interactive_html', chunk.content);
+            continue;
+          }
+          fullAnswer += chunk;
+          sendSSE(res, 'content', chunk);
+          if (!followUpPromise && fullAnswer.length > 200) {
+            followUpPromise = generateFollowUps(fullAnswer, lastUserMsg, fastModel);
+          }
         }
       }
     }
 
+    // ── Follow-ups ───────────────────────────────────────────────────────────
     if (!followUpPromise) {
       followUpPromise = generateFollowUps(fullAnswer, lastUserMsg, fastModel);
     }
-
     const followUps = await followUpPromise;
     if (followUps.length > 0) {
       sendSSE(res, 'follow_ups', followUps);

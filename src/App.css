@@ -838,7 +838,7 @@
 
 /* ── Interactive caption (text below visual — same style as main body) ── */
 .interactive-caption {
-  padding: 12px 0 0;
+  margin-top: 20px;
 }
 .interactive-caption p {
   margin: 0;
