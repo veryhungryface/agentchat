@@ -304,8 +304,36 @@ function InteractiveMenu({ code }) {
   );
 }
 
+function InteractiveCodePreview({ code }) {
+  const preRef = useRef(null);
+
+  useEffect(() => {
+    if (preRef.current) {
+      preRef.current.scrollTop = preRef.current.scrollHeight;
+    }
+  }, [code]);
+
+  const lines = (code || '').split('\n');
+  const lineCount = lines.length;
+  const charCount = (code || '').length;
+
+  return (
+    <div className="interactive-generating">
+      <div className="generating-header">
+        <div className="generating-dots"><span /><span /><span /></div>
+        <span className="generating-label">코드 생성 중</span>
+        <span className="generating-stats">{charCount.toLocaleString()}자 · {lineCount}줄</span>
+      </div>
+      <pre className="generating-code" ref={preRef}>
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
 function ChatMessage({ message, isStreaming }) {
   const isUser = message.role === 'user';
+  const showCodePreview = message.interactiveCodeBuffer && !message.interactiveHtml;
 
   return (
     <article className={`message ${isUser ? 'message-user' : 'message-assistant'} ${message.isError ? 'message-error' : ''}`}>
@@ -334,6 +362,9 @@ function ChatMessage({ message, isStreaming }) {
         ) : isStreaming ? (
           <span className="cursor-blink" />
         ) : null}
+        {showCodePreview && (
+          <InteractiveCodePreview code={message.interactiveCodeBuffer} />
+        )}
         {message.interactiveHtml && (
           <div className="interactive-embed">
             <InteractiveMenu code={message.interactiveHtml} />

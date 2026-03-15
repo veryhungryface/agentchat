@@ -512,6 +512,7 @@ export default async function handler(req, res) {
             }
           } else if (state === 'html') {
             htmlCode += chunk;
+            sendSSE(res, 'interactive_code_delta', chunk);
             const closeIdx = htmlCode.indexOf('\n```');
             if (closeIdx !== -1 && htmlCode[closeIdx + 4] !== '`') {
               const code = htmlCode.slice(0, closeIdx).trim();

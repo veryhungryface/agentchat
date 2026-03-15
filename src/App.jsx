@@ -1210,6 +1210,14 @@ function App() {
               continue;
             }
 
+            if (parsed.type === 'interactive_code_delta') {
+              updateLatestAssistant((a) => ({
+                ...a,
+                interactiveCodeBuffer: (a.interactiveCodeBuffer || '') + (parsed.data || ''),
+              }));
+              continue;
+            }
+
             if (parsed.type === 'interactive_html') {
               const raw = parsed.data || '';
               const fenceMatch = raw.match(/```html\s*\n([\s\S]*?)```/);
@@ -1218,6 +1226,7 @@ function App() {
               updateLatestAssistant((a) => ({
                 ...a,
                 interactiveHtml: htmlCode,
+                interactiveCodeBuffer: '',
               }));
               continue;
             }
